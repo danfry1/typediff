@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: oven-sh/setup-bun@4bc047ad259df6fc24a6c9b0f9a0cb08cf17fbe5 # v2.0.1
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: |
+          cd packages/typediff && bun run typecheck
+          cd ../../action && bun run typecheck
+
+      - name: Unit Tests
+        run: cd packages/typediff && bun run vitest run --exclude='**/real-packages*' --exclude='**/resolver-network*' --coverage
+
+      - name: Real-world smoke test
+        run: cd packages/typediff && bun run vitest run src/__tests__/real-packages.test.ts -t "lodash"
+        timeout-minutes: 3
+
+      - name: Action Tests
+        run: cd action && bun run test
+
+      - name: Build
+        run: |
+          cd packages/typediff && bun run build
+          cd ../../action && bun run build
+          cd ../../action && bun run bundle
+
+      - name: Check package exports
+        run: |
+          cd packages/typediff
+          npm pack --pack-destination /tmp
+          npx --yes @arethetypeswrong/cli /tmp/typediff-*.tgz --ignore-rules cjs-resolves-to-esm
+
+  node-compat:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: oven-sh/setup-bun@4bc047ad259df6fc24a6c9b0f9a0cb08cf17fbe5 # v2.0.1
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: bun install --frozen-lockfile
+      - name: Build
+        run: cd packages/typediff && bun run build
+      - name: Test with Node.js ${{ matrix.node-version }}
+        run: cd packages/typediff && node --test-force-exit node_modules/.bin/vitest run --exclude='**/real-packages*' --exclude='**/resolver-network*' --exclude='**/load*'
+
+  real-world-tests:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: quality
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: oven-sh/setup-bun@4bc047ad259df6fc24a6c9b0f9a0cb08cf17fbe5 # v2.0.1
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Build
+        run: cd packages/typediff && bun run build
+      - name: Real-world package tests
+        run: cd packages/typediff && bun run vitest run src/__tests__/real-packages.test.ts
+        timeout-minutes: 10

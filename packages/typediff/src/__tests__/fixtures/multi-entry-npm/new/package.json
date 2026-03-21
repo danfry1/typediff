@@ -1,0 +1,8 @@
+{
+  "name": "multi-entry-test",
+  "version": "2.0.0",
+  "exports": {
+    ".": { "types": "./index.d.ts" },
+    "./utils": { "types": "./utils.d.ts" }
+  }
+}

@@ -1,0 +1,27 @@
+name: 'typediff verify-deps'
+author: 'Daniel Fry'
+description: 'Verify dependency type changes match claimed semver'
+inputs:
+  severity:
+    description: 'Minimum severity to report (major, minor, patch)'
+    default: 'minor'
+  fail-on:
+    description: 'Fail the check when actual semver exceeds claimed (major, minor, never)'
+    default: 'major'
+  ignore:
+    description: 'Packages to skip (comma-separated glob patterns)'
+    default: ''
+  github-token:
+    description: 'GitHub token for posting comments and setting check status'
+    default: '${{ github.token }}'
+outputs:
+  result:
+    description: 'Whether the check passed or failed (pass/fail)'
+  actual-semver:
+    description: 'The highest actual semver level detected across all packages'
+branding:
+  icon: 'check-circle'
+  color: 'blue'
+runs:
+  using: 'node20'
+  main: 'dist-action/index.js'

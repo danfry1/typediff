@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>typediff — Verify semver accuracy by diffing TypeScript types</title>
+    <meta name="description" content="typediff uses the TypeScript compiler to structurally compare the public API between two package versions. It doesn't trust the author's semver claim — it verifies it." />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./main.js" defer></script>
+  </head>
+  <body>
+    <nav class="topbar">
+      <a class="brand" href="./">
+        <span class="brand-mark">td</span>
+        <span class="brand-word">typediff</span>
+      </a>
+      <button class="nav-toggle" id="nav-toggle">Menu</button>
+      <div class="topbar-links" id="topbar-links">
+        <a href="#features">Features</a>
+        <a href="#accuracy">Accuracy</a>
+        <a href="./docs.html">Docs</a>
+        <a href="https://github.com/danfry1/typediff" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </nav>
+
+    <main>
+      <!-- ── Hero ── -->
+      <div class="hero-wrap">
+      <div class="hero-scanlines"></div>
+      <section class="hero reveal">
+        <div class="hero-eyebrow"><span class="status-dot"></span>semver verification for TypeScript</div>
+        <h1>Don't trust semver.<br /><em>Verify it.</em></h1>
+        <p class="hero-sub">
+          npm semver is on the honour system. <strong>typediff</strong> verifies it by
+          actually diffing the types. Dependabot merges a "minor" bump on Friday,
+          your build breaks Monday morning&mdash;typediff catches that before it ships.
+        </p>
+
+        <div class="install-block">
+          <div class="install-cmd">
+            <code><span class="prefix">$</span> npx typediff inspect zod@3.22.0 zod@3.23.0</code>
+            <button class="copy-btn" data-copy="npx typediff inspect zod@3.22.0 zod@3.23.0">Copy</button>
+          </div>
+        </div>
+
+        <div class="hero-actions">
+          <a class="button button-primary" href="./docs.html">Read the Docs</a>
+          <a class="button button-secondary" href="https://github.com/danfry1/typediff" target="_blank" rel="noopener">GitHub</a>
+        </div>
+      </section>
+
+      <!-- ── Terminal ── -->
+      <div class="terminal-wrap">
+        <div class="terminal">
+          <div class="terminal-bar">
+            <div class="terminal-dots"><span></span><span></span><span></span></div>
+            <span class="terminal-title">typediff inspect zod@3.22.0 zod@3.23.0</span>
+            <span></span>
+          </div>
+          <div class="terminal-body has-reveal-groups" id="terminal-demo">
+<div data-reveal-group="1"><span class="t-brand">  typediff</span>  <span class="t-pkg">zod</span> <span class="t-ver">3.22.0</span> <span class="t-dim">&rarr;</span> <span class="t-ver">3.23.0</span></div>
+<div data-reveal-group="2"> </div>
+<div data-reveal-group="3">  <span class="t-label">Claimed</span>   <span class="t-minor">minor</span></div>
+<div data-reveal-group="4">  <span class="t-label">Actual</span>    <span class="t-major">major</span> <span class="t-mismatch">&#10006; MISMATCH</span></div>
+<div data-reveal-group="5">  <span class="t-num">2</span> <span class="t-label">breaking</span>  &middot;  <span class="t-num">39</span> <span class="t-label">minor</span>  &middot;  <span class="t-num">67</span> <span class="t-label">compatible</span></div>
+<div data-reveal-group="6">   <span class="t-heading">BREAKING</span></div>
+<div data-reveal-group="7">  <span class="t-break-icon">&#10006;</span> <span class="t-name">ZodStringCheck</span>
+    <span class="t-desc">Union type widened &mdash; new variants may break exhaustive switches</span></div>
+<div data-reveal-group="8">  <span class="t-break-icon">&#10006;</span> <span class="t-name">StringValidation</span>
+    <span class="t-desc">Union type widened &mdash; new variants may break exhaustive switches</span></div>
+<div data-reveal-group="9">   <span class="t-heading">MINOR</span>
+  <span class="t-add-icon">+</span> <span class="t-name">datetimeRegex</span>  <span class="t-desc">New function</span>
+  <span class="t-add-icon">+</span> <span class="t-name">ZodString.nanoid</span>  <span class="t-desc">New method</span>
+  <span class="t-add-icon">+</span> <span class="t-name">ZodString.base64</span>  <span class="t-desc">New method</span>
+  <span class="t-dim">  ... and 36 more minor changes</span></div>
+<div data-reveal-group="10">  <span class="t-ok">COMPATIBLE</span> <span class="t-desc">(67 changes verified as non-breaking)</span></div>
+<div data-reveal-group="11">  <span class="t-time">Done in 1.4s</span><span class="terminal-cursor"></span></div>
+</div>
+        </div>
+      </div>
+      </div><!-- /hero-wrap -->
+
+      <div class="section-divider"><span class="sweep-dot"></span></div>
+
+      <!-- ── Pipeline ── -->
+      <section class="section reveal" style="padding-top: 3rem; padding-bottom: 2rem;">
+        <div class="pipeline">
+          <div class="pipeline-node">
+            <div class="pipeline-node-dot">1</div>
+            <span class="pipeline-node-label">Resolve</span>
+            <span class="pipeline-node-desc">Download from npm</span>
+          </div>
+          <div class="pipeline-edge"><span class="edge-pulse-dot"></span></div>
+          <div class="pipeline-node">
+            <div class="pipeline-node-dot">2</div>
+            <span class="pipeline-node-label">Extract</span>
+            <span class="pipeline-node-desc">Parse with tsc</span>
+          </div>
+          <div class="pipeline-edge"><span class="edge-pulse-dot"></span></div>
+          <div class="pipeline-node">
+            <div class="pipeline-node-dot">3</div>
+            <span class="pipeline-node-label">Diff</span>
+            <span class="pipeline-node-desc">Structural compare</span>
+          </div>
+          <div class="pipeline-edge"><span class="edge-pulse-dot"></span></div>
+          <div class="pipeline-node">
+            <div class="pipeline-node-dot">4</div>
+            <span class="pipeline-node-label">Verify</span>
+            <span class="pipeline-node-desc">TS assignability</span>
+          </div>
+          <div class="pipeline-edge"><span class="edge-pulse-dot"></span></div>
+          <div class="pipeline-node">
+            <div class="pipeline-node-dot">5</div>
+            <span class="pipeline-node-label">Classify</span>
+            <span class="pipeline-node-desc">major / minor / patch</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Features ── -->
+      <section class="section reveal" id="features">
+        <div class="section-header">
+          <span class="eyebrow">What it does</span>
+          <h2>Structural type diffing, not string matching</h2>
+          <p>
+            Uses the TypeScript compiler to structurally compare public APIs.
+            Doesn't trust the author's semver claim&mdash;it verifies it.
+          </p>
+        </div>
+
+        <div class="features-grid">
+          <article class="feature-card has-red reveal-child">
+            <div class="feature-icon-row">
+              <div class="feature-icon feature-icon-red">!</div>
+              <span class="feature-label">DETECT</span>
+            </div>
+            <h3>Catches breaking changes</h3>
+            <p>Detects breaks hidden in minor and patch bumps before they reach your CI pipeline or your users.</p>
+          </article>
+          <article class="feature-card has-green reveal-child">
+            <div class="feature-icon-row">
+              <div class="feature-icon feature-icon-green">&#10003;</div>
+              <span class="feature-label">VERIFY</span>
+            </div>
+            <h3>Zero false positives</h3>
+            <p>Uses TypeScript's own assignability checker. If typediff says it breaks, it breaks.</p>
+          </article>
+          <article class="feature-card has-blue reveal-child">
+            <div class="feature-icon-row">
+              <div class="feature-icon feature-icon-blue">&#9733;</div>
+              <span class="feature-label">PROVEN</span>
+            </div>
+            <h3>Battle-tested</h3>
+            <p>Validated against lodash, axios, zod, TypeScript, drizzle-orm, react, vitest, date-fns, and more.</p>
+          </article>
+        </div>
+      </section>
+
+      <div class="section-divider"><span class="sweep-dot"></span></div>
+
+      <!-- ── Accuracy ── -->
+      <section class="section reveal" id="accuracy">
+        <div class="section-header">
+          <span class="eyebrow">Accuracy</span>
+          <h2>Validated against real-world packages</h2>
+          <p>Every release is tested against packages with known changes. Zero false positives across all test cases.</p>
+        </div>
+
+        <div class="accuracy-summary">
+          <span class="prompt">&gt;</span>
+          <span class="counter" data-count-to="0">0</span> packages scanned &middot;
+          <span class="counter" data-count-to="0">0</span> false positives &middot;
+          <span class="counter" data-count-to="0">0</span> mismatches caught
+        </div>
+
+        <div class="accuracy-table-wrap">
+          <table class="accuracy-table">
+            <thead>
+              <tr><th>Package</th><th>Versions</th><th>Claimed</th><th>Actual</th><th>Result</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="pkg-name">lodash</td>
+                <td class="ver">4.17.20 &rarr; 4.17.21</td>
+                <td><span class="badge badge-patch">patch</span></td>
+                <td><span class="badge badge-patch">patch</span></td>
+                <td><span class="badge badge-clean">Clean</span></td>
+              </tr>
+              <tr>
+                <td class="pkg-name">axios</td>
+                <td class="ver">1.7.2 &rarr; 1.7.3</td>
+                <td><span class="badge badge-patch">patch</span></td>
+                <td><span class="badge badge-patch">patch</span></td>
+                <td><span class="badge badge-clean">Clean</span></td>
+              </tr>
+              <tr>
+                <td class="pkg-name">express</td>
+                <td class="ver">4.18.2 &rarr; 4.19.0</td>
+                <td><span class="badge badge-minor">minor</span></td>
+                <td><span class="badge badge-minor">minor</span></td>
+                <td><span class="badge badge-clean">Clean</span></td>
+              </tr>
+              <tr>
+                <td class="pkg-name">react</td>
+                <td class="ver">18.2.0 &rarr; 18.3.0</td>
+                <td><span class="badge badge-minor">minor</span></td>
+                <td><span class="badge badge-minor">minor</span></td>
+                <td><span class="badge badge-clean">Clean</span></td>
+              </tr>
+              <tr>
+                <td class="pkg-name">jose</td>
+                <td class="ver">5.2.0 &rarr; 5.3.0</td>
+                <td><span class="badge badge-minor">minor</span></td>
+                <td><span class="badge badge-minor">minor</span></td>
+                <td><span class="badge badge-clean">Clean</span></td>
+              </tr>
+              <tr>
+                <td class="pkg-name">vitest</td>
+                <td class="ver">2.0.0 &rarr; 2.1.0</td>
+                <td><span class="badge badge-minor">minor</span></td>
+                <td><span class="badge badge-minor">minor</span></td>
+                <td><span class="badge badge-clean">Clean</span></td>
+              </tr>
+              <tr>
+                <td class="pkg-name">date-fns</td>
+                <td class="ver">3.0.0 &rarr; 3.1.0</td>
+                <td><span class="badge badge-minor">minor</span></td>
+                <td><span class="badge badge-minor">minor</span></td>
+                <td><span class="badge badge-clean">Clean</span></td>
+              </tr>
+              <tr>
+                <td class="pkg-name">zod</td>
+                <td class="ver">3.22.0 &rarr; 3.23.0</td>
+                <td><span class="badge badge-minor">minor</span></td>
+                <td><span class="badge badge-major">major</span></td>
+                <td><span class="badge badge-breaking">Breaking</span></td>
+              </tr>
+              <tr>
+                <td class="pkg-name">typescript</td>
+                <td class="ver">5.6.2 &rarr; 5.7.2</td>
+                <td><span class="badge badge-minor">minor</span></td>
+                <td><span class="badge badge-major">major</span></td>
+                <td><span class="badge badge-breaking">Breaking</span></td>
+              </tr>
+              <tr>
+                <td class="pkg-name">drizzle-orm</td>
+                <td class="ver">0.30.0 &rarr; 0.31.0</td>
+                <td><span class="badge badge-minor">0.x minor</span></td>
+                <td><span class="badge badge-major">major</span></td>
+                <td><span class="badge badge-breaking">Breaking</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="section-divider"><span class="sweep-dot"></span></div>
+
+      <!-- ── Library Authors ── -->
+      <section class="section reveal" id="authors">
+        <div class="authors-grid">
+          <div class="authors-copy">
+            <span class="eyebrow">For library authors</span>
+            <h2>Catch accidental breaks before you publish</h2>
+            <p>Run typediff before every publish to verify your semver claim matches the actual type changes.</p>
+            <ul>
+              <li>Run in CI with <code>--exit-code</code> to gate releases</li>
+              <li>Add to <code>prepublishOnly</code> for automatic checks</li>
+              <li>Compare local builds against any published version</li>
+            </ul>
+          </div>
+          <div class="authors-code code-border-green">
+            <pre><code><span class="c-cmt"># Compare local build against latest published</span>
+npm run build
+npx typediff inspect ./dist
+
+<span class="c-cmt"># Gate releases in CI</span>
+npx typediff inspect ./dist --exit-code
+
+<span class="c-cmt"># Add to package.json</span>
+{
+  <span class="c-str">"scripts"</span>: {
+    <span class="c-str">"prepublishOnly"</span>: <span class="c-str">"typediff inspect ./dist --exit-code"</span>
+  }
+}</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <div class="section-divider"><span class="sweep-dot"></span></div>
+
+      <!-- ── GitHub Action ── -->
+      <section class="section reveal" id="action">
+        <div class="action-section">
+          <span class="eyebrow">GitHub Action</span>
+          <h2>Zero-config type verification for dependency PRs</h2>
+          <p>
+            Compares type definitions for every dependency changed in the PR, posts a comment
+            summarizing the results, and fails the check if a "minor" or "patch" bump actually
+            contains breaking type changes.
+          </p>
+
+          <div class="action-yaml code-border-green">
+            <pre><code><span class="c-kw">name:</span> <span class="c-str">Verify Dependency Updates</span>
+<span class="c-kw">on:</span>
+  <span class="c-kw">pull_request:</span>
+    <span class="c-kw">paths:</span>
+      <span class="c-str">- 'package.json'</span>
+      <span class="c-str">- 'package-lock.json'</span>
+
+<span class="c-kw">jobs:</span>
+  <span class="c-kw">verify-deps:</span>
+    <span class="c-kw">runs-on:</span> <span class="c-str">ubuntu-latest</span>
+    <span class="c-kw">steps:</span>
+      <span class="c-str">- uses: actions/checkout@v4</span>
+      <span class="c-str">- uses: danfry1/typediff@v1</span></code></pre>
+          </div>
+
+          <div class="action-inputs">
+            <table>
+              <thead>
+                <tr><th>Input</th><th>Description</th><th>Default</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>severity</code></td>
+                  <td>Minimum severity to report</td>
+                  <td><code>minor</code></td>
+                </tr>
+                <tr>
+                  <td><code>fail-on</code></td>
+                  <td>Fail when actual exceeds claimed</td>
+                  <td><code>major</code></td>
+                </tr>
+                <tr>
+                  <td><code>ignore</code></td>
+                  <td>Packages to skip (comma-separated globs)</td>
+                  <td>&mdash;</td>
+                </tr>
+                <tr>
+                  <td><code>github-token</code></td>
+                  <td>Token for comments and check status</td>
+                  <td><code>${{ github.token }}</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer has-scanlines" style="position: relative;">
+      <span class="footer-brand">typediff</span>
+      <span>MIT &middot; <a href="https://github.com/danfry1" target="_blank" rel="noopener">danfry1</a></span>
+      <div class="footer-links">
+        <a href="https://github.com/danfry1/typediff" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://www.npmjs.com/package/typediff" target="_blank" rel="noopener">npm</a>
+        <a href="./docs.html">Docs</a>
+      </div>
+    </footer>
+  </body>
+</html>

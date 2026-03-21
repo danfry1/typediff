@@ -1,0 +1,80 @@
+{
+  "name": "typediff",
+  "version": "0.2.0",
+  "description": "Verify semver accuracy by diffing TypeScript types between package versions",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "typediff": "./dist/cli/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./advanced": {
+      "types": "./dist/advanced.d.ts",
+      "import": "./dist/advanced.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run --exclude='**/real-packages*' --exclude='**/resolver-network*'",
+    "test:all": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "size": "bun run build && npm pack --dry-run 2>&1 | tail -5",
+    "lint": "oxlint --deny-warnings src",
+    "prepublishOnly": "bun run build && bun run lint && bun run typecheck"
+  },
+  "dependencies": {
+    "minimatch": "^10.0.0",
+    "semver": "^7.6.0",
+    "typescript": "^5.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/semver": "^7.5.0",
+    "@vitest/coverage-v8": "3",
+    "vitest": "^3.0.0"
+  },
+  "files": [
+    "dist",
+    "!dist/__tests__",
+    "!dist/**/*.js.map",
+    "!dist/**/*.d.ts.map",
+    "LICENSE",
+    "README.md"
+  ],
+  "license": "MIT",
+  "keywords": [
+    "typescript",
+    "semver",
+    "types",
+    "diff",
+    "api",
+    "breaking-changes",
+    "verify",
+    "compatibility",
+    "version",
+    "dts"
+  ],
+  "author": "Daniel Fry",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danfry1/typediff.git",
+    "directory": "packages/typediff"
+  },
+  "homepage": "https://github.com/danfry1/typediff#readme",
+  "bugs": {
+    "url": "https://github.com/danfry1/typediff/issues"
+  }
+}
