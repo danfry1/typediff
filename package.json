@@ -1,0 +1,22 @@
+{
+  "name": "typediff-workspace",
+  "private": true,
+  "workspaces": ["packages/*", "action"],
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "cd packages/typediff && bun run build && cd ../../action && bun run build",
+    "test": "cd packages/typediff && bun run test && cd ../../action && bun run test",
+    "typecheck": "cd packages/typediff && bun run typecheck && cd ../../action && bun run typecheck",
+    "lint": "oxlint --deny-warnings packages/typediff/src action/src",
+    "prepare": "test -n \"$CI\" || lefthook install"
+  },
+  "author": "Daniel Fry",
+  "license": "MIT",
+  "devDependencies": {
+    "lefthook": "^2.1.4",
+    "oxlint": "^1.56.0"
+  }
+}

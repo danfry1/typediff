@@ -1,0 +1,12 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: lint
+      run: bun run lint
+    - name: typecheck
+      run: cd packages/typediff && bun run typecheck
+
+pre-push:
+  jobs:
+    - name: test
+      run: cd packages/typediff && bun run test

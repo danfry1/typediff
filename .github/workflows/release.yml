@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: github.repository == 'danfry1/typediff'
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - run: npm install -g npm@latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: cd packages/typediff && bun run typecheck
+
+      - name: Test
+        run: cd packages/typediff && bun run vitest run --exclude='**/real-packages*' --exclude='**/resolver-network*'
+
+      - name: Build
+        run: |
+          cd packages/typediff && bun run build
+          cd ../../action && bun run build
+          cd ../../action && bun run bundle
+
+      - name: Commit action bundle to tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f action/dist-action
+          git commit -m "chore: build action bundle for release" --allow-empty
+          git tag -f ${{ github.ref_name }}
+          git push --force origin ${{ github.ref_name }}
+
+      - name: Publish to npm
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: cd packages/typediff && npm publish --provenance --access public --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.3.2
+        with:
+          generate_release_notes: true

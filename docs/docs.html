@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Documentation — typediff</title>
+    <meta name="description" content="Complete documentation for typediff — installation, CLI usage, programmatic API, configuration, GitHub Action, and how it works." />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="typediff" />
+    <meta property="og:title" content="Documentation — typediff" />
+    <meta property="og:description" content="Complete documentation for typediff — CLI usage, programmatic API, configuration, and GitHub Action setup." />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Documentation — typediff" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./main.js" defer></script>
+  </head>
+  <body>
+    <div class="site-shell">
+      <nav class="topbar">
+        <a class="brand" href="./" aria-label="typediff home">
+          <span class="brand-mark">td</span>
+          <span class="brand-word">typediff</span>
+        </a>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">Menu</button>
+        <div class="topbar-links" id="topbar-links">
+          <a href="./">Home</a>
+          <a href="./docs.html" class="is-active">Docs</a>
+          <a href="https://github.com/danfry1/typediff" target="_blank" rel="noopener">GitHub</a>
+        </div>
+      </nav>
+
+      <button class="sidebar-toggle" id="sidebar-toggle">Show Nav</button>
+
+      <div class="docs-layout">
+        <aside class="docs-sidebar">
+          <nav class="docs-nav">
+            <h4>Getting Started</h4>
+            <a href="#installation">Installation</a>
+            <a href="#quick-start">Quick Start</a>
+
+            <h4>CLI Usage</h4>
+            <a href="#inspect">inspect</a>
+            <a href="#snapshot">snapshot</a>
+            <a href="#compare">compare</a>
+            <a href="#workspaces">workspaces</a>
+
+            <h4>Reference</h4>
+            <a href="#all-options">All Options</a>
+            <a href="#configuration">Configuration</a>
+            <a href="#exit-codes">Exit Codes</a>
+
+            <h4>Programmatic API</h4>
+            <a href="#api-overview">Overview</a>
+            <a href="#api-diff">diff()</a>
+            <a href="#api-difflocal">diffLocal()</a>
+            <a href="#api-diffmixed">diffMixed()</a>
+            <a href="#api-extractapitree">extractApiTree()</a>
+            <a href="#api-diffapitrees">diffApiTrees()</a>
+            <a href="#api-classifychange">classifyChange()</a>
+            <a href="#api-checkcompatibility">checkCompatibility()</a>
+            <a href="#api-snapshots">Snapshots</a>
+
+            <h4>Types</h4>
+            <a href="#type-changeset">ChangeSet</a>
+            <a href="#type-change">Change</a>
+
+            <h4>Integrations</h4>
+            <a href="#github-action">GitHub Action</a>
+
+            <h4>Internals</h4>
+            <a href="#how-it-works">How It Works</a>
+          </nav>
+        </aside>
+
+        <main class="docs-content">
+          <h1>Documentation</h1>
+          <p class="docs-lead">
+            Everything you need to use typediff &mdash; from CLI commands to the programmatic API.
+          </p>
+
+          <!-- ── Installation ── -->
+          <h2 id="installation">Installation</h2>
+
+          <p>Install globally or use directly with <code>npx</code>:</p>
+
+          <pre class="code-block"><code>npm install -g typediff
+
+# or run directly without installing
+npx typediff inspect &lt;pkg@old&gt; &lt;pkg@new&gt;</code></pre>
+
+          <!-- ── Quick Start ── -->
+          <h2 id="quick-start">Quick Start</h2>
+
+          <p>Compare two versions of any npm package:</p>
+
+          <pre class="code-block"><code>npx typediff inspect zod@3.22.0 zod@3.23.0</code></pre>
+
+          <p>typediff downloads both versions, extracts their public API surfaces using the TypeScript compiler, and produces a structured diff with a semver verdict.</p>
+
+          <!-- ── CLI: inspect ── -->
+          <h2 id="inspect">inspect</h2>
+
+          <p>The primary command. Compare two package versions and get a semver verdict.</p>
+
+          <h3>Two explicit versions</h3>
+          <pre class="code-block"><code>typediff inspect zod@3.22.0 zod@3.23.0</code></pre>
+
+          <h3>Auto-detect previous version</h3>
+          <pre class="code-block"><code>typediff inspect zod@3.23.0
+# Automatically finds 3.22.0 and compares</code></pre>
+
+          <h3>Compare local build against npm</h3>
+          <pre class="code-block"><code>npm run build
+typediff inspect ./dist my-lib@latest</code></pre>
+
+          <h3>Auto-detect from local package</h3>
+          <pre class="code-block"><code>npm run build
+typediff inspect ./dist
+# Reads package.json, finds the previous npm version, and compares</code></pre>
+
+          <h3>CI with exit codes</h3>
+          <pre class="code-block"><code>typediff inspect zod@3.22.0 zod@3.23.0 --exit-code
+# Exit 0 = no breaking changes
+# Exit 1 = breaking changes found
+# Exit 2 = operational error</code></pre>
+
+          <h3>Filter by severity</h3>
+          <pre class="code-block"><code>typediff inspect zod@3.22.0 zod@3.23.0 --severity major</code></pre>
+
+          <h3>Ignore specific exports</h3>
+          <pre class="code-block"><code>typediff inspect zod@3.22.0 zod@3.23.0 --ignore "internal.*" --ignore "unstable.*"</code></pre>
+
+          <h3>Honor TSDoc tags</h3>
+          <pre class="code-block"><code>typediff inspect my-lib@1.0.0 my-lib@2.0.0 --respect-tags
+# @internal/@alpha breaking changes &rarr; patch
+# @beta breaking changes &rarr; minor
+# @deprecated removals &rarr; minor</code></pre>
+
+          <!-- ── CLI: snapshot ── -->
+          <h2 id="snapshot">snapshot</h2>
+
+          <p>Save the API surface of a package to a JSON file for later comparison. Useful for CI pipelines where you want to capture a baseline before changes.</p>
+
+          <pre class="code-block"><code>typediff snapshot ./dist -o baseline.json</code></pre>
+
+          <!-- ── CLI: compare ── -->
+          <h2 id="compare">compare</h2>
+
+          <p>Compare a previously saved snapshot against a local path or published package.</p>
+
+          <pre class="code-block"><code># Save a baseline
+typediff snapshot ./dist -o baseline.json
+
+# ... make changes ...
+
+# Compare against the baseline
+typediff compare baseline.json ./dist</code></pre>
+
+          <!-- ── CLI: workspaces ── -->
+          <h2 id="workspaces">workspaces</h2>
+
+          <p>Scan all publishable workspace packages in a monorepo:</p>
+
+          <pre class="code-block"><code>typediff --workspaces
+typediff --workspaces --filter "packages/core-*"</code></pre>
+
+          <!-- ── All Options ── -->
+          <h2 id="all-options">All Options</h2>
+
+          <pre class="code-block"><code>Usage:
+  typediff inspect &lt;pkg@version&gt;             (auto-detect previous version)
+  typediff inspect &lt;pkg@old&gt; &lt;pkg@new&gt;
+  typediff inspect ./local-path &lt;pkg@version&gt;
+  typediff inspect ./local-path              (auto-detect from package.json)
+  typediff snapshot &lt;path&gt; [-o &lt;file&gt;]
+  typediff compare &lt;snapshot.json&gt; &lt;path-or-pkg@version&gt;
+
+Options:
+  --format &lt;json|pretty&gt;   Output format (default: auto-detect TTY)
+  --severity &lt;level&gt;       Minimum severity: major, minor, patch
+  --ignore &lt;pattern&gt;       Glob pattern to ignore (repeatable)
+  --respect-tags           Honor @internal/@beta/@public TSDoc tags
+  --verbose                Show all changes including compatible ones
+  --quiet, -q              One-line verdict output
+  --exit-code              Exit 1 if breaking changes found
+  --include-internals      Include _-prefixed internal members
+  --workspaces             Scan all workspace packages
+  --filter &lt;glob&gt;          Filter workspaces (with --workspaces)
+  --registry &lt;url&gt;         Custom npm registry URL (also reads .npmrc)
+  --debug                  Show diagnostic debug output
+  -h, --help               Show this help
+  -v, --version            Show version</code></pre>
+
+          <!-- ── Configuration ── -->
+          <h2 id="configuration">Configuration</h2>
+
+          <p>Create a <code>.typediffrc.json</code> in your project root to set default options:</p>
+
+          <pre class="code-block"><code>{
+  "ignore": ["internal.*", "unstable.*"],
+  "severity": "minor",
+  "exitCode": true,
+  "respectTags": true,
+  "quiet": false
+}</code></pre>
+
+          <p>CLI flags always override config file values.</p>
+
+          <!-- ── Exit Codes ── -->
+          <h2 id="exit-codes">Exit Codes</h2>
+
+          <div class="docs-table-wrap">
+            <table>
+              <thead>
+                <tr><th>Code</th><th>Meaning</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>0</code></td><td>Success (or no breaking changes with <code>--exit-code</code>)</td></tr>
+                <tr><td><code>1</code></td><td>Breaking changes detected (with <code>--exit-code</code>)</td></tr>
+                <tr><td><code>2</code></td><td>Operational error (network failure, invalid package, etc.)</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- ── Programmatic API ── -->
+          <h2 id="api-overview">Programmatic API</h2>
+
+          <p>Import typediff into your own tools and scripts:</p>
+
+          <pre class="code-block"><code>import { diff, diffLocal, diffMixed } from 'typediff'
+
+// Compare two npm versions
+const result = await diff('zod', '3.22.0', '3.23.0')
+
+console.log(result.claimedSemver) // 'minor'
+console.log(result.actualSemver)  // 'major'
+
+const breaking = result.changes.filter(c => c.semver === 'major')
+// [{ path: 'ZodStringCheck', kind: 'changed', semver: 'major', ... }]</code></pre>
+
+          <!-- diff() -->
+          <h3 id="api-diff">diff(name, oldVersion, newVersion, options?)</h3>
+          <p>Compare two npm-published versions of a package.</p>
+          <pre class="code-block"><code>const result = await diff('zod', '3.22.0', '3.23.0')
+// result: ChangeSet</code></pre>
+
+          <!-- diffLocal() -->
+          <h3 id="api-difflocal">diffLocal(oldPath, newPath, options?)</h3>
+          <p>Compare two local package directories.</p>
+          <pre class="code-block"><code>const result = await diffLocal('./old-dist', './new-dist')
+// result: ChangeSet</code></pre>
+
+          <!-- diffMixed() -->
+          <h3 id="api-diffmixed">diffMixed(localPath, npmPkg, npmVersion, localIsOld, options?)</h3>
+          <p>Compare a local build against a published npm version.</p>
+          <pre class="code-block"><code>const result = await diffMixed('./dist', 'my-lib', '1.0.0', false)
+// result: ChangeSet</code></pre>
+
+          <!-- extractApiTree() -->
+          <h3 id="api-extractapitree">extractApiTree(dtsPath, meta)</h3>
+          <p>Extract the public API tree from a <code>.d.ts</code> file. Returns a structured representation of all exported types, functions, classes, interfaces, enums, and namespaces.</p>
+          <pre class="code-block"><code>import { extractApiTree } from 'typediff'
+
+const tree = extractApiTree('./dist/index.d.ts', { packageName: 'my-lib' })</code></pre>
+
+          <!-- diffApiTrees() -->
+          <h3 id="api-diffapitrees">diffApiTrees(oldTree, newTree)</h3>
+          <p>Diff two API trees directly. Useful when you have already extracted the trees and want to compare them.</p>
+          <pre class="code-block"><code>import { extractApiTree, diffApiTrees } from 'typediff'
+
+const oldTree = extractApiTree('./old/index.d.ts', { packageName: 'my-lib' })
+const newTree = extractApiTree('./new/index.d.ts', { packageName: 'my-lib' })
+const changes = diffApiTrees(oldTree, newTree)</code></pre>
+
+          <!-- classifyChange() -->
+          <h3 id="api-classifychange">classifyChange(change, oldNode?, newNode?)</h3>
+          <p>Classify a single change as major, minor, or patch based on the change kind and node types.</p>
+
+          <!-- checkCompatibility() -->
+          <h3 id="api-checkcompatibility">checkCompatibility(oldDts, newDts, exports)</h3>
+          <p>Run TypeScript assignability checks between old and new declaration files. This is the core mechanism that eliminates false positives.</p>
+
+          <!-- Snapshots API -->
+          <h3 id="api-snapshots">createSnapshot / loadSnapshot</h3>
+          <p>Save and load API snapshots for baseline comparisons:</p>
+          <pre class="code-block"><code>import { createSnapshot, loadSnapshot } from 'typediff'
+
+// Save current API surface
+const snapshot = await createSnapshot('./dist')
+
+// Later, load and compare
+const baseline = await loadSnapshot('./baseline.json')</code></pre>
+
+          <!-- ── Exported Functions Table ── -->
+
+          <div class="docs-table-wrap" style="margin-top: 2rem;">
+            <table>
+              <thead>
+                <tr><th>Function</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>diff(name, oldVersion, newVersion, options?)</code></td><td>Compare two npm-published versions</td></tr>
+                <tr><td><code>diffLocal(oldPath, newPath, options?)</code></td><td>Compare two local package directories</td></tr>
+                <tr><td><code>diffMixed(localPath, npmPkg, npmVersion, localIsOld, options?)</code></td><td>Compare local against npm</td></tr>
+                <tr><td><code>extractApiTree(dtsPath, meta)</code></td><td>Extract the public API tree from a <code>.d.ts</code> file</td></tr>
+                <tr><td><code>diffApiTrees(oldTree, newTree)</code></td><td>Diff two API trees</td></tr>
+                <tr><td><code>classifyChange(change, oldNode?, newNode?)</code></td><td>Classify a single change as major/minor/patch</td></tr>
+                <tr><td><code>checkCompatibility(oldDts, newDts, exports)</code></td><td>Run TypeScript assignability checks</td></tr>
+                <tr><td><code>createSnapshot(localPath)</code></td><td>Save API surface to a snapshot</td></tr>
+                <tr><td><code>loadSnapshot(filePath)</code></td><td>Load a previously saved snapshot</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- ── Types ── -->
+          <h2 id="type-changeset">ChangeSet</h2>
+
+          <p>The primary result type returned by <code>diff()</code>, <code>diffLocal()</code>, and <code>diffMixed()</code>.</p>
+
+          <pre class="code-block"><code>interface ChangeSet {
+  packageName: string
+  oldVersion: string
+  newVersion: string
+  changes: Change[]
+  actualSemver: SemverLevel    // 'major' | 'minor' | 'patch'
+  claimedSemver?: SemverLevel
+}</code></pre>
+
+          <h2 id="type-change">Change</h2>
+
+          <p>Represents a single detected change between versions.</p>
+
+          <pre class="code-block"><code>interface Change {
+  kind: ChangeKind        // 'added' | 'removed' | 'changed'
+  path: string            // e.g. 'ZodStringCheck' or 'ColumnBuilder.$onUpdate'
+  semver: SemverLevel
+  description: string
+  oldSignature?: string
+  newSignature?: string
+}</code></pre>
+
+          <p>The <code>path</code> field uses dot notation for nested members (e.g., <code>ColumnBuilder.$onUpdate</code>). The <code>semver</code> field reflects the severity after applying TypeScript assignability checks.</p>
+
+          <!-- ── GitHub Action ── -->
+          <h2 id="github-action">GitHub Action</h2>
+
+          <p>Zero-config type verification for dependency PRs. The action compares type definitions for every dependency changed in the PR, posts a comment summarizing the results, and fails the check if a "minor" or "patch" bump actually contains breaking type changes.</p>
+
+          <pre class="code-block"><code>name: Verify Dependency Updates
+on:
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+
+jobs:
+  verify-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: danfry1/typediff@v1</code></pre>
+
+          <h3>Action Inputs</h3>
+
+          <div class="docs-table-wrap">
+            <table>
+              <thead>
+                <tr><th>Input</th><th>Description</th><th>Default</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>severity</code></td>
+                  <td>Minimum severity to report (<code>major</code>, <code>minor</code>, <code>patch</code>)</td>
+                  <td><code>minor</code></td>
+                </tr>
+                <tr>
+                  <td><code>fail-on</code></td>
+                  <td>Fail when actual semver exceeds claimed (<code>major</code>, <code>minor</code>, <code>never</code>)</td>
+                  <td><code>major</code></td>
+                </tr>
+                <tr>
+                  <td><code>ignore</code></td>
+                  <td>Packages to skip (comma-separated glob patterns)</td>
+                  <td>&mdash;</td>
+                </tr>
+                <tr>
+                  <td><code>github-token</code></td>
+                  <td>GitHub token for comments and check status</td>
+                  <td><code>${{ github.token }}</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>Custom Configuration</h3>
+
+          <pre class="code-block"><code>- uses: danfry1/typediff@v1
+  with:
+    severity: major
+    fail-on: minor
+    ignore: "@types/node,internal-*"</code></pre>
+
+          <!-- ── How It Works ── -->
+          <h2 id="how-it-works">How It Works</h2>
+
+          <p>typediff follows a 5-step pipeline to produce accurate semver verdicts:</p>
+
+          <div class="pipeline-steps">
+            <div class="pipeline-step">
+              <span class="pipeline-step-num">1</span>
+              <span class="pipeline-step-label">Resolve</span>
+              <span class="pipeline-step-desc">Download from npm or resolve local paths</span>
+            </div>
+            <div class="pipeline-step">
+              <span class="pipeline-step-num">2</span>
+              <span class="pipeline-step-label">Extract</span>
+              <span class="pipeline-step-desc">Parse public API with the TS compiler</span>
+            </div>
+            <div class="pipeline-step">
+              <span class="pipeline-step-num">3</span>
+              <span class="pipeline-step-label">Diff</span>
+              <span class="pipeline-step-desc">Structurally diff the API trees</span>
+            </div>
+            <div class="pipeline-step">
+              <span class="pipeline-step-num">4</span>
+              <span class="pipeline-step-label">Verify</span>
+              <span class="pipeline-step-desc">TypeScript assignability checks</span>
+            </div>
+            <div class="pipeline-step">
+              <span class="pipeline-step-num">5</span>
+              <span class="pipeline-step-label">Classify</span>
+              <span class="pipeline-step-desc">Assign major / minor / patch</span>
+            </div>
+          </div>
+
+          <ol>
+            <li><strong>Resolve</strong> &mdash; Downloads both package versions from npm (or resolves local paths). Supports custom registries and <code>.npmrc</code> configuration.</li>
+            <li><strong>Extract</strong> &mdash; Uses the TypeScript compiler to extract the public API surface: interfaces, types, functions, classes, enums, and namespaces.</li>
+            <li><strong>Diff</strong> &mdash; Structurally diffs the two API trees. Detects additions, removals, and changes at every level of the type hierarchy.</li>
+            <li><strong>Verify</strong> &mdash; Runs TypeScript's assignability checker to verify compatibility and eliminate false positives. If an old type is assignable to the new type, the change is not breaking.</li>
+            <li><strong>Classify</strong> &mdash; Each change is classified as major (breaking), minor (additive), or patch (compatible). The overall verdict is the highest severity found.</li>
+          </ol>
+
+          <p>The verification step (4) is what sets typediff apart. Instead of relying on heuristics or string matching, it uses the same type checker that would fail your build. If typediff says it breaks, it will break your code.</p>
+
+        </main>
+      </div>
+
+      <footer class="footer">
+        <p style="color: var(--ink-strong); font-weight: 600;">typediff</p>
+        <p>MIT License &middot; Built by <a href="https://github.com/danfry1" target="_blank" rel="noopener">danfry1</a></p>
+        <div class="footer-links">
+          <a href="https://github.com/danfry1/typediff" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://www.npmjs.com/package/typediff" target="_blank" rel="noopener">npm</a>
+        </div>
+      </footer>
+    </div>
+  </body>
+</html>
