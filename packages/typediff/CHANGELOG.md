@@ -2,6 +2,20 @@
 
 All notable changes to typediff will be documented in this file.
 
+## [0.3.0](https://github.com/danfry1/typediff/compare/typediff-v0.2.0...typediff-v0.3.0) (2026-03-29)
+
+
+### Features
+
+* typediff — verify semver accuracy by diffing TypeScript types ([86c0c88](https://github.com/danfry1/typediff/commit/86c0c8881bcdf53f3c9e8263ea72118ba4ccdf5f))
+
+
+### Bug Fixes
+
+* skip network-dependent workspace test in CI ([75ee4a2](https://github.com/danfry1/typediff/commit/75ee4a2fa69d6c97098a3088096eba9c7d16475a))
+* unignore test fixture dist/ directories in .gitignore ([76f4867](https://github.com/danfry1/typediff/commit/76f4867d2c47f2b1cc84fd49241bc84a02956951))
+* update jose test — correctly detects breaking type widening ([139dcb4](https://github.com/danfry1/typediff/commit/139dcb4543a3555b985bb397168703f6bfe81fed))
+
 ## [0.2.0] - 2026-03-29
 
 ### Added
