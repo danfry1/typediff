@@ -1,5 +1,6 @@
 node_modules/
 dist/
+!**/fixtures/**/dist/
 dist-action/
 *.tgz
 .DS_Store
