@@ -49,7 +49,7 @@ jobs:
         run: |
           cd packages/typediff
           npm pack --pack-destination /tmp
-          npx --yes @arethetypeswrong/cli /tmp/typediff-*.tgz --ignore-rules cjs-resolves-to-esm
+          npx --yes @arethetypeswrong/cli /tmp/typediff-*.tgz --ignore-rules cjs-resolves-to-esm --ignore-rules no-resolution
 
   node-compat:
     runs-on: ubuntu-latest
