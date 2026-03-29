@@ -22,6 +22,11 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      - name: Build
+        run: |
+          cd packages/typediff && bun run build
+          cd ../../action && bun run build
+
       - name: Typecheck
         run: |
           cd packages/typediff && bun run typecheck
@@ -37,11 +42,8 @@ jobs:
       - name: Action Tests
         run: cd action && bun run test
 
-      - name: Build
-        run: |
-          cd packages/typediff && bun run build
-          cd ../../action && bun run build
-          cd ../../action && bun run bundle
+      - name: Bundle action
+        run: cd action && bun run bundle
 
       - name: Check package exports
         run: |
@@ -66,7 +68,7 @@ jobs:
       - name: Build
         run: cd packages/typediff && bun run build
       - name: Test with Node.js ${{ matrix.node-version }}
-        run: cd packages/typediff && node --test-force-exit node_modules/.bin/vitest run --exclude='**/real-packages*' --exclude='**/resolver-network*' --exclude='**/load*'
+        run: cd packages/typediff && npx vitest run --exclude='**/real-packages*' --exclude='**/resolver-network*' --exclude='**/load*'
 
   real-world-tests:
     runs-on: ubuntu-latest
