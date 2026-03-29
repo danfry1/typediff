@@ -33,7 +33,7 @@ jobs:
           cd ../../action && bun run typecheck
 
       - name: Unit Tests
-        run: cd packages/typediff && bun run vitest run --exclude='**/real-packages*' --exclude='**/resolver-network*' --coverage
+        run: cd packages/typediff && bun run vitest run --exclude='**/real-packages*' --exclude='**/resolver-network*'
 
       - name: Real-world smoke test
         run: cd packages/typediff && bun run vitest run src/__tests__/real-packages.test.ts -t "lodash"
@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [18, 20, 22]
+        node-version: [20, 22]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
