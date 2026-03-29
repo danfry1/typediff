@@ -48,11 +48,16 @@ describe('real-world packages', () => {
     }, 60_000)
   })
 
-  describe('jose 5.2.0 → 5.3.0 (minor)', () => {
-    it('reports no breaking changes — clean minor bump', async () => {
+  describe('jose 5.2.0 → 5.3.0 (minor with hidden breaking type changes)', () => {
+    it('detects breaking changes — jose widens iv/tag from string to string|undefined', async () => {
       const result = await diff('jose', '5.2.0', '5.3.0')
       expect(result.claimedSemver).toBe('minor')
-      expect(result.changes.filter(c => c.semver === 'major')).toHaveLength(0)
+      // jose 5.3.0 changes FlattenedJWE.iv, .tag and GeneralJWE.iv, .tag
+      // from `string` to `string | undefined` — breaking for consumers
+      // who read these as non-optional string properties.
+      const majors = result.changes.filter(c => c.semver === 'major')
+      expect(majors.length).toBeGreaterThan(0)
+      expect(majors.some(c => c.path.includes('iv'))).toBe(true)
     }, 60_000)
   })
 
