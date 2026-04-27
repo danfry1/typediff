@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@actions/core": "^1.10.0",
+    "@actions/core": "^3.0.1",
     "@actions/github": "^6.0.0",
     "minimatch": "^10.0.0",
     "typediff": "workspace:*"
