@@ -3,10 +3,120 @@ import { join, resolve, dirname, sep } from 'node:path'
 import { tmpdir, homedir } from 'node:os'
 import { randomUUID, createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
+import { gunzipSync } from 'node:zlib'
 import semver from 'semver'
-import { resolveLocal, type ResolveResult } from './local.js'
+import { resolveLocal, NoTypesError, type ResolveResult } from './local.js'
 
 const DEFAULT_REGISTRY = 'https://registry.npmjs.org'
+
+/** Hard ceiling on a downloaded tarball (256 MiB) — guards against
+ *  decompression-bomb / infinite-stream registries and bounds in-memory buffering. */
+const MAX_TARBALL_BYTES = 268_435_456
+/** Abort a body read that stalls (no bytes) for this long. */
+const BODY_STALL_TIMEOUT_MS = 60_000
+
+/**
+ * Read a response body into a Buffer with a size cap and a stall timeout. The
+ * fetch-level timeout only covers headers; once headers arrive it is disarmed,
+ * so a slow or unbounded body (e.g. from a malicious custom registry) would
+ * otherwise hang the process and buffer without limit.
+ */
+export async function readBodyWithLimit(response: Response, maxBytes: number): Promise<Buffer> {
+  const declared = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new Error(`Tarball exceeds the maximum allowed size (${declared} > ${maxBytes} bytes)`)
+  }
+  const body = response.body
+  if (!body) return Buffer.from(await response.arrayBuffer())
+
+  const reader = body.getReader()
+  const chunks: Buffer[] = []
+  let total = 0
+  try {
+    for (;;) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const stall = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Tarball download stalled')), BODY_STALL_TIMEOUT_MS)
+      })
+      let result: ReadableStreamReadResult<Uint8Array>
+      try {
+        result = await Promise.race([reader.read(), stall])
+      } finally {
+        clearTimeout(timer)
+      }
+      if (result.done) break
+      total += result.value.byteLength
+      if (total > maxBytes) {
+        throw new Error(`Tarball exceeds the maximum allowed size (${maxBytes} bytes)`)
+      }
+      chunks.push(Buffer.from(result.value))
+    }
+  } finally {
+    void reader.cancel().catch(() => {})
+  }
+  return Buffer.concat(chunks)
+}
+
+/**
+ * Detect whether a gzipped tarball contains anything other than regular files,
+ * directories, and metadata headers — i.e. symlink ('2') or hardlink ('1')
+ * entries, device/fifo entries, or names that escape via an absolute path or a
+ * `..` segment. The system `tar` (depending on version) will create a symlink
+ * and then write *through* it to escape the extraction directory (zip-slip via
+ * symlink); such tarballs are routed to the JS fallback extractor, which ignores
+ * those entries by construction and still recovers the `.d.ts` files we need.
+ */
+export function tarballHasUnsafeEntries(tarballBuffer: Buffer): boolean {
+  let data: Buffer
+  try {
+    data = gunzipSync(tarballBuffer)
+  } catch {
+    return false // not gzip / corrupt — system tar fails, safe JS fallback runs
+  }
+  // POSIX ustar header field offsets (mirrors extractTarGz).
+  const TAR_BLOCK = 512
+  const TAR_NAME_END = 100
+  const TAR_SIZE_START = 124
+  const TAR_SIZE_END = 136
+  const TAR_TYPE_OFFSET = 156
+  const TAR_PREFIX_START = 345
+  const TAR_PREFIX_END = 500
+  // Type flags safe for system tar: regular file ('0'/legacy/contiguous '7'),
+  // directory ('5'), and metadata headers (PAX 'x'/'g', GNU long name/link 'L'/'K').
+  const TYPE_FILE = 48
+  const TYPE_FILE_LEGACY = 0
+  const TYPE_CONTIGUOUS = 55
+  const TYPE_DIR = 53
+  const TYPE_PAX_EXTENDED = 120
+  const TYPE_PAX_GLOBAL = 103
+  const TYPE_GNU_LONGNAME = 76
+  const TYPE_GNU_LONGLINK = 75
+  const SAFE_TYPES = new Set([
+    TYPE_FILE, TYPE_FILE_LEGACY, TYPE_CONTIGUOUS, TYPE_DIR,
+    TYPE_PAX_EXTENDED, TYPE_PAX_GLOBAL, TYPE_GNU_LONGNAME, TYPE_GNU_LONGLINK,
+  ])
+  const OCTAL = 8
+  const stripNul = (s: string): string => {
+    const i = s.indexOf('\0')
+    return i === -1 ? s : s.slice(0, i)
+  }
+  let offset = 0
+  while (offset + TAR_BLOCK <= data.length) {
+    const header = data.subarray(offset, offset + TAR_BLOCK)
+    if (header.every((b) => b === 0)) break // end-of-archive marker
+    const typeFlag = header[TAR_TYPE_OFFSET]
+    const nameRaw = stripNul(header.subarray(0, TAR_NAME_END).toString('utf-8'))
+    const prefix = stripNul(header.subarray(TAR_PREFIX_START, TAR_PREFIX_END).toString('utf-8'))
+    const name = prefix ? `${prefix}/${nameRaw}` : nameRaw
+
+    if (!SAFE_TYPES.has(typeFlag)) return true
+    if (name.startsWith('/') || name.split('/').some((seg) => seg === '..')) return true
+
+    const size = parseInt(stripNul(header.subarray(TAR_SIZE_START, TAR_SIZE_END).toString('utf-8')).trim(), OCTAL) || 0
+    offset += TAR_BLOCK + Math.ceil(size / TAR_BLOCK) * TAR_BLOCK
+  }
+  return false
+}
 
 // Set up proxy support if HTTPS_PROXY or HTTP_PROXY env vars are present.
 // Node 22+ handles this natively; for Node 18-20 we attempt to load undici.
@@ -276,7 +386,12 @@ export async function resolveNpm(
 
   try {
     return resolveLocal(cacheDir)
-  } catch {
+  } catch (err) {
+    // Only the absence of type definitions should trigger the @types fallback.
+    // Operational failures (disk full, permission denied, corrupt package.json)
+    // must propagate — swallowing them would mask the real cause behind a
+    // misleading "no type definitions found" message.
+    if (!(err instanceof NoTypesError)) throw err
     // No types found in main package — try @types fallback
     // Use the package's major version to find a corresponding @types version,
     // since DefinitelyTyped aligns major versions with the source package.
@@ -284,14 +399,15 @@ export async function resolveNpm(
       const typesPackageName = getTypesPackageName(packageName)
       try {
         return await resolveNpm(typesPackageName, 'latest', options)
-      } catch {
-        throw new Error(
+      } catch (typesErr) {
+        throw new NoTypesError(
           `No type definitions found for ${packageName}@${version}. ` +
             `Also tried ${typesPackageName} but it was not available.`,
+          { cause: typesErr },
         )
       }
     }
-    throw new Error(`No type definitions found for ${packageName}@${version}`)
+    throw new NoTypesError(`No type definitions found for ${packageName}@${version}`, { cause: err })
   }
 }
 
@@ -451,7 +567,7 @@ async function downloadAndExtract(
     )
   }
 
-  const tarballBuffer = Buffer.from(await tarRes.arrayBuffer())
+  const tarballBuffer = await readBodyWithLimit(tarRes, MAX_TARBALL_BYTES)
 
   // Verify tarball integrity if the registry provided a hash
   const expectedIntegrity = meta.dist?.integrity
@@ -484,13 +600,20 @@ async function downloadAndExtract(
     const tgzPath = join(stagingDir, 'package.tgz')
     writeFileSync(tgzPath, tarballBuffer)
 
-    try {
-      execFileSync('tar', ['-xzf', 'package.tgz', '--strip-components=1'], {
-        cwd: stagingDir,
-      })
-    } catch {
-      // Fallback: extract using Node.js built-in zlib (Windows compat)
+    // Tarballs containing symlinks/links/escaping paths must never touch the
+    // system tar (zip-slip via symlink). Route them straight to the JS extractor,
+    // which ignores those entries and recovers the regular files safely.
+    if (tarballHasUnsafeEntries(tarballBuffer)) {
       await extractTarGz(tgzPath, stagingDir)
+    } else {
+      try {
+        execFileSync('tar', ['-xzf', 'package.tgz', '--strip-components=1'], {
+          cwd: stagingDir,
+        })
+      } catch {
+        // Fallback: extract using Node.js built-in zlib (Windows compat)
+        await extractTarGz(tgzPath, stagingDir)
+      }
     }
 
     // Atomic move from staging to cache (same filesystem, so rename is atomic)

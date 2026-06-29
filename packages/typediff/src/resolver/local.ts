@@ -12,6 +12,19 @@ export interface ResolveResult {
 }
 
 /**
+ * Thrown when a package exists but ships no usable type definitions. Callers use
+ * this to distinguish "no types here, try @types" from genuine operational
+ * failures (disk full, permission denied, corrupt package.json) which must not
+ * be silently swallowed and reported as missing types.
+ */
+export class NoTypesError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'NoTypesError'
+  }
+}
+
+/**
  * Walk up from `startDir` to find the nearest directory containing a package.json.
  * Returns the directory path, or null if none found.
  */
@@ -30,7 +43,7 @@ export function resolveLocal(dir: string): ResolveResult {
   let pkgDir = absDir
   if (!existsSync(join(absDir, 'package.json'))) {
     const found = findPackageRoot(absDir)
-    if (!found) throw new Error(`No package.json found in or above ${absDir}`)
+    if (!found) throw new NoTypesError(`No package.json found in or above ${absDir}`)
     pkgDir = found
   }
   const pkgJsonPath = join(pkgDir, 'package.json')
@@ -74,7 +87,7 @@ export function resolveLocal(dir: string): ResolveResult {
     }
   }
 
-  throw new Error(
+  throw new NoTypesError(
     `No type definitions found in ${absDir}. ` +
       `Checked: exports["."].types, types, typings, and index.d.ts`,
   )
@@ -91,7 +104,7 @@ export function resolveMultiEntry(dir: string): MultiEntryResult {
   let pkgDir = absDir
   if (!existsSync(join(absDir, 'package.json'))) {
     const found = findPackageRoot(absDir)
-    if (!found) throw new Error(`No package.json found in or above ${absDir}`)
+    if (!found) throw new NoTypesError(`No package.json found in or above ${absDir}`)
     pkgDir = found
   }
   const pkgJsonPath = join(pkgDir, 'package.json')
