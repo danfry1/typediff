@@ -91,9 +91,12 @@ describe('real-world packages', () => {
 
       const breaking = result.changes.filter(c => c.semver === 'major')
       // Must catch at least the known union widenings. The count is higher because
-      // invariant-position types are no longer falsely downgraded to minor.
+      // invariant-position types are no longer falsely downgraded to minor, and
+      // static class members (e.g. ZodString.create) are now part of the surface.
+      // The upper bound guards against a false-positive explosion; clean bumps
+      // (lodash/axios/react/...) separately assert exactly zero breaking changes.
       expect(breaking.length).toBeGreaterThanOrEqual(1)
-      expect(breaking.length).toBeLessThanOrEqual(10)
+      expect(breaking.length).toBeLessThanOrEqual(13)
 
       // superRefine overload splits: the refinement at the top-level export is
       // no longer falsely downgraded for invariant-position types, so individual
