@@ -46,6 +46,58 @@ function fullSignatureText(node: ApiNode): string {
 }
 
 /**
+ * Remove text that can carry identifiers which are NOT type references, so the
+ * tokenizer doesn't create phantom edges:
+ *  - string and template literals: `type T = 'active' | 'inactive'` must not
+ *    edge to an export named `active`. (`${...}` interiors are preserved, since
+ *    template-literal types can interpolate real type references.)
+ *  - line and block comments.
+ */
+function stripNonReferenceText(text: string): string {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')        // block comments
+    .replace(/\/\/[^\n]*/g, ' ')              // line comments
+    .replace(/`(?:[^`\\$]|\\.|\$(?!\{))*`/g, ' ') // template literals with no interpolation
+    .replace(/'(?:[^'\\]|\\.)*'/g, ' ')       // single-quoted strings
+    .replace(/"(?:[^"\\]|\\.)*"/g, ' ')       // double-quoted strings
+}
+
+/** Names a type declares as its own generic parameters — references to these are
+ *  local, not edges to package exports. Best-effort: reads the first `<...>` group. */
+function ownTypeParameters(signature: string): Set<string> {
+  const params = new Set<string>()
+  const open = signature.indexOf('<')
+  if (open === -1) return params
+  // Walk to the matching '>' so we only capture the declaration's own parameter list.
+  let depth = 0
+  let end = -1
+  for (let i = open; i < signature.length; i++) {
+    if (signature[i] === '<') depth++
+    else if (signature[i] === '>') {
+      depth--
+      if (depth === 0) { end = i; break }
+    }
+  }
+  if (end === -1) return params
+  const inner = signature.slice(open + 1, end)
+  // A parameter name is the leading identifier of each top-level comma segment.
+  let segDepth = 0
+  let seg = ''
+  const segments: string[] = []
+  for (const ch of inner) {
+    if (ch === '<' || ch === '(' || ch === '{' || ch === '[') segDepth++
+    else if (ch === '>' || ch === ')' || ch === '}' || ch === ']') segDepth--
+    if (ch === ',' && segDepth === 0) { segments.push(seg); seg = '' } else seg += ch
+  }
+  segments.push(seg)
+  for (const s of segments) {
+    const m = s.trim().match(/^[A-Za-z_$][A-Za-z0-9_$]*/)
+    if (m) params.add(m[0])
+  }
+  return params
+}
+
+/**
  * Forward reference graph over TOP-LEVEL exports.
  * An edge A → B means A's public type surface mentions B. Edges only point at
  * known package exports, so unrelated identifiers (locals, lib globals) drop out.
@@ -61,11 +113,13 @@ function buildReferenceGraph(tree: ApiTree): Map<string, Set<string>> {
 
   for (const exp of tree.exports) {
     const refs = new Set<string>()
-    const text = fullSignatureText(exp)
+    const text = stripNonReferenceText(fullSignatureText(exp))
+    const typeParams = ownTypeParameters(exp.signature)
     for (const match of text.matchAll(IDENT)) {
       const id = match[0]
       if (id === exp.name) continue
       if (NON_REFERENCES.has(id)) continue
+      if (typeParams.has(id)) continue
       if (exportNames.has(id)) refs.add(id)
     }
     graph.set(exp.name, refs)

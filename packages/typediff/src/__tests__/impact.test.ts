@@ -112,6 +112,52 @@ describe('annotateImpact', () => {
     expect(changes[0].impact).toBeUndefined()
   })
 
+  it('does not edge to an export name appearing inside a string-literal type', () => {
+    // `active` is both an export and a literal in Mode's union — it must not
+    // count as Mode referencing the `active` export.
+    const t = tree([
+      node({ name: 'active', signature: 'interface active { v: string }' }),
+      node({ name: 'Mode', signature: "type Mode = 'active' | 'inactive'" }),
+      node({ name: 'Other', signature: 'interface Other { v: string }' }),
+    ])
+    const changes = [change({ path: 'active' })]
+    annotateImpact(changes, t)
+    expect(changes[0].impact?.referencedByPublicExports).toBe(0)
+  })
+
+  it('does not edge through identifiers inside comments', () => {
+    const t = tree([
+      node({ name: 'Core', signature: 'interface Core { v: string }' }),
+      node({ name: 'A', signature: 'interface A { /* uses Core elsewhere */ v: string }' }),
+    ])
+    const changes = [change({ path: 'Core' })]
+    annotateImpact(changes, t)
+    expect(changes[0].impact?.referencedByPublicExports).toBe(0)
+  })
+
+  it('does not treat a type’s own generic parameter as a reference', () => {
+    // `Item` is Box's type parameter here, not the exported `Item`.
+    const t = tree([
+      node({ name: 'Item', signature: 'interface Item { id: string }' }),
+      node({ name: 'Box', signature: 'interface Box<Item> { value: Item }' }),
+    ])
+    const changes = [change({ path: 'Item' })]
+    annotateImpact(changes, t)
+    expect(changes[0].impact?.referencedByPublicExports).toBe(0)
+  })
+
+  it('still counts a real reference that shares a name with a generic param elsewhere', () => {
+    // Box<T> uses T (local), but Holder genuinely references the Item export.
+    const t = tree([
+      node({ name: 'Item', signature: 'interface Item { id: string }' }),
+      node({ name: 'Box', signature: 'interface Box<T> { value: T }' }),
+      node({ name: 'Holder', signature: 'interface Holder { item: Item }' }),
+    ])
+    const changes = [change({ path: 'Item' })]
+    annotateImpact(changes, t)
+    expect(changes[0].impact?.referencedByPublicExports).toBe(1)
+  })
+
   it('populates impact end-to-end through diffLocal', async () => {
     const result = await diffLocal(
       join(fixturesDir, 'impact-ranking/old'),

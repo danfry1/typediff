@@ -232,7 +232,7 @@ typediff scores each breaking change `high` / `medium` / `low` and lists the hig
 ```
    BREAKING
 
-  ✖ ZodStringCheck  high impact · 190 exports depend on it
+  ✖ ZodStringCheck  high impact · 156 exports depend on it
     Union type widened — new variants may break exhaustive switches
 
   ✖ objectUtil.addQuestionMarks.R  low impact
