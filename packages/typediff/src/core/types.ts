@@ -58,6 +58,19 @@ export const SEVERITY_ORDER: Record<SemverLevel, number> = {
 /** Ordered from most to least severe — used by formatters for display grouping. */
 export const SEMVER_LEVELS: SemverLevel[] = ['major', 'minor', 'patch']
 
+export type ImpactTier = 'high' | 'medium' | 'low'
+
+export interface Impact {
+  /** Coarse ranking bucket — drives display ordering only, never the verdict. */
+  tier: ImpactTier
+  /** # of top-level public exports whose type surface transitively reaches this symbol. */
+  referencedByPublicExports: number
+  /** Centrality normalized against the number of other top-level exports (0–1). */
+  centralityRatio: number
+  /** How reachable the changed symbol is for a consumer importing the package. */
+  prominence: 'top-level' | 'nested' | 'deep'
+}
+
 export interface ChangeDetails {
   /** For union changes: members that were added */
   addedMembers?: string[]
@@ -93,6 +106,12 @@ export interface Change {
   details?: ChangeDetails
   /** The kind of the parent node (set for child-level changes like properties, params, type params) */
   parentKind?: NodeKind
+  /**
+   * Heuristic blast-radius score derived from the package's own public type
+   * graph. Drives display ordering only — it never affects `semver` or the
+   * aggregate verdict. Present for major/minor changes once impact analysis runs.
+   */
+  impact?: Impact
 }
 
 export interface ChangeSet {

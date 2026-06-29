@@ -12,8 +12,11 @@ export type {
   NodeKind,
   Position,
   Modifiers,
+  Impact,
+  ImpactTier,
 } from './core/types.js'
 export { SEVERITY_ORDER, SEMVER_LEVELS } from './core/types.js'
+export { annotateImpact } from './core/impact.js'
 
 // Re-export commonly used building blocks for convenience
 // Full set available via 'typediff/advanced'
@@ -31,6 +34,7 @@ import { classifyChange, deriveClaimedSemver, applyTagRefinement } from './core/
 import { resolveMultiEntry, type MultiEntryResult } from './resolver/local.js'
 import { resolveNpm } from './resolver/npm.js'
 import { refineWithCompatibility, aggregateSemver, applyFilters } from './core/refine.js'
+import { annotateImpact } from './core/impact.js'
 
 /**
  * Shared multi-entry diff loop used by diff(), diffLocal(), and diffMixed().
@@ -41,10 +45,21 @@ function diffMultiEntry(
   oldMulti: MultiEntryResult,
   newMulti: MultiEntryResult,
   options?: TypediffOptions,
-): Change[] {
+): { changes: Change[]; diagnostics: string[] } {
   const allChanges: Change[] = []
-  const onWarn = options?.onWarn
   const onDebug = options?.onDebug
+
+  // Capture verdict-affecting warnings (e.g. unanalyzable exports, exports that
+  // resolved to `any`, compatibility-refinement failures) so they can be
+  // surfaced on the ChangeSet. This keeps the user's own onWarn behavior intact
+  // while ensuring a degraded analysis is never silently reported as a clean
+  // verdict. Deduped because the same condition can fire per entry point.
+  const userWarn = options?.onWarn
+  const diagnostics = new Set<string>()
+  const onWarn = (msg: string): void => {
+    diagnostics.add(msg)
+    userWarn?.(msg)
+  }
 
   onDebug?.(`Old package: ${oldMulti.packageName}@${oldMulti.version} (${oldMulti.entries.length} entry points)`)
   onDebug?.(`New package: ${newMulti.packageName}@${newMulti.version} (${newMulti.entries.length} entry points)`)
@@ -84,6 +99,7 @@ function diffMultiEntry(
         }
         change.entryPoint = newEntry.entryPoint === '.' ? undefined : newEntry.entryPoint
       }
+      annotateImpact(changes, newTree)
       allChanges.push(...changes)
       continue
     }
@@ -126,6 +142,10 @@ function diffMultiEntry(
       onDebug?.(`Compatibility refinement: ${downgraded}/${changedCount} changes downgraded from major`)
     }
 
+    // Score blast radius against the new tree's public type graph. Display-only —
+    // runs before prefixing, while paths are still bare top-level names.
+    annotateImpact(changes, newTree)
+
     // Prefix paths AFTER refinement so change.path.split('.')[0] works correctly
     for (const change of changes) {
       if (newEntry.entryPoint !== '.') {
@@ -164,7 +184,7 @@ function diffMultiEntry(
     }
   }
 
-  return allChanges
+  return { changes: allChanges, diagnostics: [...diagnostics] }
 }
 
 export async function diffLocal(
@@ -178,7 +198,8 @@ export async function diffLocal(
   const newMulti = resolveMultiEntry(newPath)
   const tExtract = performance.now()
 
-  let allChanges = diffMultiEntry(oldMulti, newMulti, options)
+  const diffResult = diffMultiEntry(oldMulti, newMulti, options)
+  let allChanges = diffResult.changes
   const tDiff = performance.now()
 
   if (options?.respectTags) {
@@ -197,6 +218,7 @@ export async function diffLocal(
     changes: allChanges,
     actualSemver,
     claimedSemver,
+    ...(diffResult.diagnostics.length > 0 && { diagnostics: diffResult.diagnostics }),
     timings: {
       extractMs: Math.round(tExtract - t0),
       diffMs: Math.round(tDiff - tExtract),
@@ -225,7 +247,8 @@ export async function diff(
   const newMulti = resolveMultiEntry(newResolved.packageDir)
   const tExtract = performance.now()
 
-  let allChanges = diffMultiEntry(oldMulti, newMulti, options)
+  const diffResult = diffMultiEntry(oldMulti, newMulti, options)
+  let allChanges = diffResult.changes
   const tDiff = performance.now()
 
   if (options?.respectTags) {
@@ -244,6 +267,7 @@ export async function diff(
     changes: allChanges,
     actualSemver,
     claimedSemver,
+    ...(diffResult.diagnostics.length > 0 && { diagnostics: diffResult.diagnostics }),
     timings: {
       resolveMs: Math.round(tResolve - t0),
       extractMs: Math.round(tExtract - tResolve),
@@ -273,7 +297,8 @@ export async function diffMixed(
   const newMulti = localIsOld ? npmMulti : localMulti
 
   options?.onProgress?.('Extracting API surface...')
-  let allChanges = diffMultiEntry(oldMulti, newMulti, options)
+  const diffResult = diffMultiEntry(oldMulti, newMulti, options)
+  let allChanges = diffResult.changes
   const tDiff = performance.now()
 
   if (options?.respectTags) {
@@ -294,6 +319,7 @@ export async function diffMixed(
     changes: allChanges,
     actualSemver,
     claimedSemver,
+    ...(diffResult.diagnostics.length > 0 && { diagnostics: diffResult.diagnostics }),
     timings: {
       resolveMs: Math.round(tResolve - t0),
       diffMs: Math.round(tDiff - tResolve),

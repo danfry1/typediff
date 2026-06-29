@@ -70,6 +70,45 @@ describe('Pretty formatter', () => {
     expect(output).toContain('createClient')
   })
 
+  it('renders an impact badge for scored breaking changes', () => {
+    const scored: ChangeSet = {
+      packageName: 'lib',
+      oldVersion: '1.0.0',
+      newVersion: '1.1.0',
+      actualSemver: 'major',
+      changes: [
+        {
+          kind: 'changed', path: 'Core', semver: 'major', description: 'widened',
+          impact: { tier: 'high', referencedByPublicExports: 7, centralityRatio: 0.7, prominence: 'top-level' },
+        },
+      ],
+    }
+    const output = strip(formatPretty([scored]))
+    expect(output).toContain('high impact')
+    expect(output).toContain('7 exports depend on it')
+  })
+
+  it('orders breaking changes by impact, high first', () => {
+    const ordered: ChangeSet = {
+      packageName: 'lib',
+      oldVersion: '1.0.0',
+      newVersion: '1.1.0',
+      actualSemver: 'major',
+      changes: [
+        {
+          kind: 'changed', path: 'LowOne', semver: 'major', description: 'x',
+          impact: { tier: 'low', referencedByPublicExports: 0, centralityRatio: 0, prominence: 'deep' },
+        },
+        {
+          kind: 'changed', path: 'HighOne', semver: 'major', description: 'y',
+          impact: { tier: 'high', referencedByPublicExports: 9, centralityRatio: 0.9, prominence: 'top-level' },
+        },
+      ],
+    }
+    const output = strip(formatPretty([ordered]))
+    expect(output.indexOf('HighOne')).toBeLessThan(output.indexOf('LowOne'))
+  })
+
   it('handles empty changes ("No type changes detected")', () => {
     const emptyResult: ChangeSet = {
       packageName: 'empty-lib',
