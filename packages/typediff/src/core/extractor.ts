@@ -171,11 +171,38 @@ function extractWithChecker(
     )
   }
 
+  const DEGRADED_THRESHOLD = 0.3
+
   const anyCount = exports.filter((e) => e.signature === 'any').length
-  const ANY_THRESHOLD = 0.3
-  if (anyCount > 0 && anyCount >= exports.length * ANY_THRESHOLD) {
+  if (anyCount > 0 && anyCount >= exports.length * DEGRADED_THRESHOLD) {
     options.onWarn?.(
       `${anyCount} of ${exports.length} exports resolved to 'any' — type declarations may use an unsupported module format (e.g., bundler-generated .mjs imports without matching .d.mts files)`,
+    )
+  }
+
+  // Detect exports that reference unresolved (error) types. These come from
+  // imports the analysis could not resolve — most commonly a dependency whose
+  // type declarations are not present in the sandbox. They stringify to their
+  // original name (so signature comparison cannot see the degradation), which
+  // makes this an important self-diagnostic: a diff over these exports may
+  // silently miss or invent changes.
+  let unresolvedCount = 0
+  for (const sym of explicitExports) {
+    const decl = sym.valueDeclaration ?? sym.getDeclarations()?.[0]
+    if (!decl) continue
+    try {
+      if (isUnresolvedType(checker.getTypeOfSymbolAtLocation(sym, decl))) {
+        unresolvedCount++
+      }
+    } catch {
+      // getTypeOfSymbolAtLocation can throw on some pathological symbols — ignore.
+    }
+  }
+  if (unresolvedCount > 0 && unresolvedCount >= explicitExports.length * DEGRADED_THRESHOLD) {
+    options.onWarn?.(
+      `${unresolvedCount} of ${explicitExports.length} exports reference types that could not be resolved — ` +
+      `they likely come from a dependency whose type declarations are not available to the analysis, ` +
+      `so changes to these exports may be inaccurate`,
     )
   }
 
@@ -185,6 +212,22 @@ function extractWithChecker(
     entryPoint: options.entryPoint,
     exports,
   }
+}
+
+/**
+ * Detects the TypeScript "error type" — the placeholder the checker substitutes
+ * when a referenced type cannot be resolved (e.g. an import from a dependency
+ * whose declarations are absent). It carries the `Any` flag with an
+ * `intrinsicName` of `'error'` and stringifies to the original (unresolved)
+ * name, so it is invisible to signature comparison. Distinct from a genuine
+ * `any` (`intrinsicName === 'any'`), which is an authored choice rather than a
+ * resolution failure.
+ */
+function isUnresolvedType(type: ts.Type): boolean {
+  return (
+    (type.flags & ts.TypeFlags.Any) !== 0 &&
+    (type as ts.Type & { intrinsicName?: string }).intrinsicName === 'error'
+  )
 }
 
 /**
@@ -205,6 +248,7 @@ function buildApiNode(
   symbol: ts.Symbol,
   parentPath: string,
   checker: ts.TypeChecker,
+  visited = new Set<ts.Symbol>(),
 ): ApiNode | null {
   const name = normalizeSymbolName(symbol.getName())
   const path = parentPath ? `${parentPath}.${name}` : name
@@ -224,12 +268,31 @@ function buildApiNode(
   const kind = resolvedDecl
     ? determineKind(resolvedSymbol, resolvedDecl)
     : determineKind(symbol, decl)
-  const type = checker.getTypeOfSymbolAtLocation(symbol, decl)
+  let type: ts.Type
+  try {
+    type = checker.getTypeOfSymbolAtLocation(symbol, decl)
+  } catch {
+    // getTypeOfSymbolAtLocation can throw on pathological symbols (malformed or
+    // unresolvable types from complex DefinitelyTyped packages, synthetic ambient
+    // symbols, etc.). Skip this export rather than crashing the whole extraction.
+    return null
+  }
   const signature = getSignature(checker, type, resolvedSymbol, resolvedDecl ?? decl, kind)
   const effectiveDecl = resolvedDecl ?? decl
   const position = determinePosition(kind, effectiveDecl)
   const modifiers = extractModifiers(effectiveDecl, resolvedSymbol)
-  const children = buildChildren(resolvedSymbol, effectiveDecl, path, checker, kind, type)
+  // Cycle guard: namespace/alias declaration merges can reference an ancestor
+  // symbol (e.g. `namespace Foo { export import Bar = Foo }`), which would recurse
+  // until the stack overflows. Expand children only when this symbol is not
+  // already being expanded higher up the current chain.
+  let children: ApiNode[]
+  if (visited.has(resolvedSymbol)) {
+    children = []
+  } else {
+    visited.add(resolvedSymbol)
+    children = buildChildren(resolvedSymbol, path, checker, kind, type, visited)
+    visited.delete(resolvedSymbol)
+  }
 
   // Extract JSDoc tags from the resolved (non-alias) symbol
   const tagDecl = resolvedSymbol.getDeclarations()?.[0]
@@ -542,6 +605,17 @@ function extractIndexSignatures(
   }
 }
 
+/** Stringify a parameter's type, tolerating symbols whose type cannot be
+ *  resolved (getTypeOfSymbolAtLocation can throw on pathological inputs). */
+function paramTypeString(checker: ts.TypeChecker, param: ts.Symbol, decl: ts.Declaration): string {
+  try {
+    const paramType = checker.getTypeOfSymbolAtLocation(param, decl)
+    return checker.typeToString(paramType, undefined, ts.TypeFormatFlags.NoTruncation)
+  } catch {
+    return 'unknown'
+  }
+}
+
 function extractCallSignaturesAsChildren(
   type: ts.Type,
   parentPath: string,
@@ -554,8 +628,7 @@ function extractCallSignaturesAsChildren(
     const params = sig.parameters.map((p) => {
       const decls = p.getDeclarations()
       if (!decls || decls.length === 0) return `${p.getName()}: any`
-      const paramType = checker.getTypeOfSymbolAtLocation(p, decls[0])
-      return `${p.getName()}: ${checker.typeToString(paramType, undefined, ts.TypeFormatFlags.NoTruncation)}`
+      return `${p.getName()}: ${paramTypeString(checker, p, decls[0])}`
     })
     const returnType = checker.typeToString(sig.getReturnType(), undefined, ts.TypeFormatFlags.NoTruncation)
     const sigStr = `(${params.join(', ')}) => ${returnType}`
@@ -585,8 +658,7 @@ function extractConstructSignatures(
     const params = sig.parameters.map((p) => {
       const decls = p.getDeclarations()
       if (!decls || decls.length === 0) return `${p.getName()}: any`
-      const paramType = checker.getTypeOfSymbolAtLocation(p, decls[0])
-      return `${p.getName()}: ${checker.typeToString(paramType, undefined, ts.TypeFormatFlags.NoTruncation)}`
+      return `${p.getName()}: ${paramTypeString(checker, p, decls[0])}`
     })
     const returnType = checker.typeToString(sig.getReturnType(), undefined, ts.TypeFormatFlags.NoTruncation)
     const sigStr = `new (${params.join(', ')}) => ${returnType}`
@@ -604,15 +676,68 @@ function extractConstructSignatures(
   }
 }
 
+/**
+ * Extract the exports of a namespace merged onto a symbol (interface+namespace,
+ * function+namespace, or a plain namespace). Deduplicates against already-present
+ * children by name so a merged member never collides with an instance member.
+ */
+function extractNamespaceExports(
+  symbol: ts.Symbol,
+  parentPath: string,
+  checker: ts.TypeChecker,
+  children: ApiNode[],
+  visited: Set<ts.Symbol>,
+): void {
+  if (!(symbol.flags & (ts.SymbolFlags.NamespaceModule | ts.SymbolFlags.ValueModule))) return
+  const seen = new Set(children.map((c) => c.name))
+  for (const nsSym of checker.getExportsOfModule(symbol)) {
+    const node = buildApiNode(nsSym, parentPath, checker, visited)
+    if (node && !seen.has(node.name)) {
+      children.push(node)
+      seen.add(node.name)
+    }
+  }
+}
+
+/**
+ * Extract static members from a class's constructor type. Static members live on
+ * the constructor, not the instance type, so they are otherwise invisible — a
+ * removed/changed static factory (Buffer.from, URL.canParse, ...) would not be
+ * flagged. Names are prefixed with `static ` to avoid colliding with a
+ * same-named instance member in the diff.
+ */
+function extractStaticMembers(
+  constructorType: ts.Type,
+  parentPath: string,
+  checker: ts.TypeChecker,
+  children: ApiNode[],
+  visited: Set<ts.Symbol>,
+): void {
+  for (const prop of constructorType.getProperties()) {
+    const d = prop.getDeclarations()?.[0]
+    if (!d || !ts.canHaveModifiers(d) || !d.modifiers) continue
+    const isStatic = d.modifiers.some((m) => m.kind === ts.SyntaxKind.StaticKeyword)
+    const isPrivate = d.modifiers.some((m) => m.kind === ts.SyntaxKind.PrivateKeyword)
+    if (!isStatic || isPrivate) continue
+    const node = buildApiNode(prop, parentPath, checker, visited)
+    if (node) {
+      node.name = `static ${node.name}`
+      node.path = parentPath ? `${parentPath}.${node.name}` : node.name
+      children.push(node)
+    }
+  }
+}
+
 function buildChildren(
   symbol: ts.Symbol,
-  decl: ts.Declaration,
   parentPath: string,
   checker: ts.TypeChecker,
   kind: NodeKind,
   type: ts.Type,
+  visited = new Set<ts.Symbol>(),
 ): ApiNode[] {
   const children: ApiNode[] = []
+  const decl = symbol.getDeclarations()?.[0]
 
   if (kind === 'interface') {
     const declaredType = checker.getDeclaredTypeOfSymbol(symbol)
@@ -620,7 +745,7 @@ function buildChildren(
     for (const prop of props) {
       const name = prop.getName()
       if (name.startsWith('#')) continue // ES private field — not public API
-      const propNode = buildApiNode(prop, parentPath, checker)
+      const propNode = buildApiNode(prop, parentPath, checker, visited)
       if (propNode) {
         children.push(propNode)
       }
@@ -631,6 +756,10 @@ function buildChildren(
     extractCallSignaturesAsChildren(declaredType, parentPath, checker, children)
     // Extract construct signatures (e.g., interface Factory { new(x: string): Foo })
     extractConstructSignatures(declaredType, parentPath, checker, children)
+    // Declaration merging: an interface can merge with a namespace, whose own
+    // exports (types, functions, consts) are public API. Without this, removing
+    // a merged namespace member would not be detected as a breaking change.
+    extractNamespaceExports(symbol, parentPath, checker, children, visited)
   } else if (kind === 'class') {
     const declaredType = checker.getDeclaredTypeOfSymbol(symbol)
     const props = declaredType.getProperties()
@@ -650,13 +779,17 @@ function buildChildren(
         }
       }
 
-      const propNode = buildApiNode(prop, parentPath, checker)
+      const propNode = buildApiNode(prop, parentPath, checker, visited)
       if (propNode) {
         children.push(propNode)
       }
     }
     // Extract index signatures for classes too
     extractIndexSignatures(declaredType, parentPath, checker, children)
+    // Static members live on the constructor type (the `type` arg), not the
+    // instance type returned by getDeclaredTypeOfSymbol. Without this, changes to
+    // static factory methods (Buffer.from, URL.canParse, Date.now, ...) are invisible.
+    extractStaticMembers(type, parentPath, checker, children, visited)
   } else if (kind === 'function' || kind === 'method') {
     const signatures = type.getCallSignatures()
     if (signatures.length > 0) {
@@ -669,7 +802,7 @@ function buildChildren(
       // detected via typeId. The child-level diff attributes the change to
       // the first overload's parameter structure.
       for (const param of sig.parameters) {
-        const paramNode = buildApiNode(param, parentPath, checker)
+        const paramNode = buildApiNode(param, parentPath, checker, visited)
         if (paramNode) {
           paramNode.kind = 'parameter'
           paramNode.position = 'input'
@@ -698,26 +831,12 @@ function buildChildren(
     // Declaration merging: if the symbol also has namespace members (e.g., function + namespace),
     // extract them so that adding/removing namespace properties is detected.
     // ValueModule covers `declare namespace` merged with a function declaration.
-    if (symbol.flags & (ts.SymbolFlags.NamespaceModule | ts.SymbolFlags.ValueModule)) {
-      const nsExports = checker.getExportsOfModule(symbol)
-      for (const nsSym of nsExports) {
-        const nsNode = buildApiNode(nsSym, parentPath, checker)
-        if (nsNode) {
-          children.push(nsNode)
-        }
-      }
-    }
+    extractNamespaceExports(symbol, parentPath, checker, children, visited)
   } else if (kind === 'namespace') {
     // Extract namespace members via module exports
-    const nsExports = checker.getExportsOfModule(symbol)
-    for (const nsSym of nsExports) {
-      const nsNode = buildApiNode(nsSym, parentPath, checker)
-      if (nsNode) {
-        children.push(nsNode)
-      }
-    }
+    extractNamespaceExports(symbol, parentPath, checker, children, visited)
   } else if (kind === 'enum') {
-    if (ts.isEnumDeclaration(decl)) {
+    if (decl && ts.isEnumDeclaration(decl)) {
       for (const member of decl.members) {
         const memberName = member.name.getText()
         const memberType = checker.getTypeAtLocation(member)
