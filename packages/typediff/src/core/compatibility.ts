@@ -409,30 +409,39 @@ function serializeFunctionTypeFromSignatures(
   return `{ ${parts.join('; ')} }`
 }
 
+/**
+ * Serialize a single parameter for signature comparison. Crucially includes the
+ * `...` prefix for rest parameters: without it, `(...args: T[])` and `(args: T[])`
+ * serialize identically, so the phase-2 string-equality fast path skips the
+ * assignability check and a breaking rest→positional change is downgraded to patch.
+ */
+function serializeParam(p: ts.Symbol, checker: ts.TypeChecker): string {
+  const decls = p.getDeclarations()
+  if (!decls || decls.length === 0) return `${p.getName()}: any`
+  const decl = decls[0]
+  const isRest = ts.isParameter(decl) && !!decl.dotDotDotToken
+  let paramTypeStr: string
+  try {
+    const paramType = checker.getTypeOfSymbolAtLocation(p, decl)
+    paramTypeStr = checker.typeToString(paramType, undefined, ts.TypeFormatFlags.NoTruncation)
+  } catch {
+    paramTypeStr = 'unknown'
+  }
+  // A rest parameter is never `?`-optional.
+  const isOptional = !isRest && (p.flags & ts.SymbolFlags.Optional) !== 0
+  return `${isRest ? '...' : ''}${p.getName()}${isOptional ? '?' : ''}: ${paramTypeStr}`
+}
+
 function serializeCallSignature(
   sig: ts.Signature,
   checker: ts.TypeChecker,
 ): string {
-  const params = sig.parameters.map((p) => {
-    const decls = p.getDeclarations()
-    if (!decls || decls.length === 0) return `${p.getName()}: any`
-    const paramType = checker.getTypeOfSymbolAtLocation(p, decls[0])
-    const paramTypeStr = checker.typeToString(
-      paramType,
-      undefined,
-      ts.TypeFormatFlags.NoTruncation,
-    )
-    const isOptional = (p.flags & ts.SymbolFlags.Optional) !== 0
-    return `${p.getName()}${isOptional ? '?' : ''}: ${paramTypeStr}`
-  })
-
-  const returnType = sig.getReturnType()
+  const params = sig.parameters.map((p) => serializeParam(p, checker))
   const returnTypeStr = checker.typeToString(
-    returnType,
+    sig.getReturnType(),
     undefined,
     ts.TypeFormatFlags.NoTruncation,
   )
-
   return `(${params.join(', ')}): ${returnTypeStr}`
 }
 
@@ -440,26 +449,12 @@ function serializeCallSignatureAsArrow(
   sig: ts.Signature,
   checker: ts.TypeChecker,
 ): string {
-  const params = sig.parameters.map((p) => {
-    const decls = p.getDeclarations()
-    if (!decls || decls.length === 0) return `${p.getName()}: any`
-    const paramType = checker.getTypeOfSymbolAtLocation(p, decls[0])
-    const paramTypeStr = checker.typeToString(
-      paramType,
-      undefined,
-      ts.TypeFormatFlags.NoTruncation,
-    )
-    const isOptional = (p.flags & ts.SymbolFlags.Optional) !== 0
-    return `${p.getName()}${isOptional ? '?' : ''}: ${paramTypeStr}`
-  })
-
-  const returnType = sig.getReturnType()
+  const params = sig.parameters.map((p) => serializeParam(p, checker))
   const returnTypeStr = checker.typeToString(
-    returnType,
+    sig.getReturnType(),
     undefined,
     ts.TypeFormatFlags.NoTruncation,
   )
-
   return `(${params.join(', ')}) => ${returnTypeStr}`
 }
 

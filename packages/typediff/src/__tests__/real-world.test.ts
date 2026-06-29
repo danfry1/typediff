@@ -175,4 +175,29 @@ describe('real-world regression tests', () => {
       expect(result.actualSemver).toBe('patch')
     })
   })
+
+  describe('rest parameter changes', () => {
+    it('changing a rest parameter to a positional one is breaking (not patch)', async () => {
+      // (...args: unknown[]) accepts log("m", 1, 2, 3); (args: unknown[]) does not.
+      // Without `...` in the compat serializer both sides look identical and the
+      // change is wrongly downgraded to patch.
+      const oldDir = createPkg(`export declare function log(m: string, ...args: unknown[]): void`)
+      const newDir = createPkg(`export declare function log(m: string, args: unknown[]): void`)
+
+      const result = await diffLocal(oldDir, newDir)
+
+      expect(result.actualSemver).toBe('major')
+      expect(result.changes.some((c) => c.semver === 'major')).toBe(true)
+    })
+
+    it('does not flag an unchanged rest-parameter signature', async () => {
+      const oldDir = createPkg(`export declare function log(m: string, ...args: unknown[]): void`)
+      const newDir = createPkg(`export declare function log(m: string, ...args: unknown[]): void`)
+
+      const result = await diffLocal(oldDir, newDir)
+
+      expect(result.changes).toHaveLength(0)
+      expect(result.actualSemver).toBe('patch')
+    })
+  })
 })
