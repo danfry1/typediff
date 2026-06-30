@@ -36,10 +36,12 @@ function makeTarGz(entries: Array<{ name: string; type: number; data?: Buffer }>
   return gzipSync(Buffer.concat(blocks))
 }
 
-const FILE = 48      // '0'
-const DIR = 53       // '5'
-const SYMLINK = 50   // '2'
-const HARDLINK = 49  // '1'
+const FILE = 48          // '0'
+const DIR = 53           // '5'
+const SYMLINK = 50       // '2'
+const HARDLINK = 49      // '1'
+const GNU_LONGNAME = 76  // 'L'
+const PAX_EXTENDED = 120 // 'x'
 
 describe('tarballHasUnsafeEntries', () => {
   it('accepts a tarball of plain files and directories', () => {
@@ -76,6 +78,26 @@ describe('tarballHasUnsafeEntries', () => {
 
   it('returns false for non-gzip / corrupt input (handled downstream)', () => {
     expect(tarballHasUnsafeEntries(Buffer.from('not a gzip'))).toBe(false)
+  })
+
+  // GNU long-name and PAX entries carry the real path of the *next* entry in
+  // their data block, which the header scan does not read. They must be treated
+  // as unsafe so the tarball is routed to the JS fallback, never to system tar —
+  // otherwise the embedded `../escape` path is a zip-slip bypass.
+  it('flags a GNU long-name (L) entry even with an innocuous header name', () => {
+    const tar = makeTarGz([
+      { name: '././@LongLink', type: GNU_LONGNAME, data: Buffer.from('../../evil.sh\0') },
+      { name: 'package/innocent', type: FILE, data: Buffer.from('x') },
+    ])
+    expect(tarballHasUnsafeEntries(tar)).toBe(true)
+  })
+
+  it('flags a PAX extended (x) entry even with an innocuous header name', () => {
+    const tar = makeTarGz([
+      { name: 'package/pax_header', type: PAX_EXTENDED, data: Buffer.from('30 path=../../evil.sh\n') },
+      { name: 'package/innocent', type: FILE, data: Buffer.from('x') },
+    ])
+    expect(tarballHasUnsafeEntries(tar)).toBe(true)
   })
 })
 

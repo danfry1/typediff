@@ -81,20 +81,20 @@ export function tarballHasUnsafeEntries(tarballBuffer: Buffer): boolean {
   const TAR_TYPE_OFFSET = 156
   const TAR_PREFIX_START = 345
   const TAR_PREFIX_END = 500
-  // Type flags safe for system tar: regular file ('0'/legacy/contiguous '7'),
-  // directory ('5'), and metadata headers (PAX 'x'/'g', GNU long name/link 'L'/'K').
+  // Type flags safe for system tar: regular file ('0'/legacy/contiguous '7') and
+  // directory ('5'). PAX ('x'/'g') and GNU long-name/link ('L'/'K') metadata
+  // entries are deliberately NOT safe: they carry the real name/path/linkpath of
+  // the FOLLOWING entry inside their *data block* (which this header scan does not
+  // read), so system tar would honor an attacker-controlled `../escape` that this
+  // check cannot see. Any tarball containing them is routed to the JS fallback
+  // extractor, which only ever uses the 100-byte header name and applies a
+  // path-traversal guard. Real npm tarballs use only regular-file entries, so this
+  // costs nothing in practice.
   const TYPE_FILE = 48
   const TYPE_FILE_LEGACY = 0
   const TYPE_CONTIGUOUS = 55
   const TYPE_DIR = 53
-  const TYPE_PAX_EXTENDED = 120
-  const TYPE_PAX_GLOBAL = 103
-  const TYPE_GNU_LONGNAME = 76
-  const TYPE_GNU_LONGLINK = 75
-  const SAFE_TYPES = new Set([
-    TYPE_FILE, TYPE_FILE_LEGACY, TYPE_CONTIGUOUS, TYPE_DIR,
-    TYPE_PAX_EXTENDED, TYPE_PAX_GLOBAL, TYPE_GNU_LONGNAME, TYPE_GNU_LONGLINK,
-  ])
+  const SAFE_TYPES = new Set([TYPE_FILE, TYPE_FILE_LEGACY, TYPE_CONTIGUOUS, TYPE_DIR])
   const OCTAL = 8
   const stripNul = (s: string): string => {
     const i = s.indexOf('\0')
