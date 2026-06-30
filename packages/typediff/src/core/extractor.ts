@@ -714,6 +714,7 @@ function extractStaticMembers(
   visited: Set<ts.Symbol>,
 ): void {
   for (const prop of constructorType.getProperties()) {
+    if (prop.getName().startsWith('#')) continue // ES private static field — not public API
     const d = prop.getDeclarations()?.[0]
     if (!d || !ts.canHaveModifiers(d) || !d.modifiers) continue
     const isStatic = d.modifiers.some((m) => m.kind === ts.SyntaxKind.StaticKeyword)
@@ -804,6 +805,10 @@ function buildChildren(
     // instance type returned by getDeclaredTypeOfSymbol. Without this, changes to
     // static factory methods (Buffer.from, URL.canParse, Date.now, ...) are invisible.
     extractStaticMembers(type, parentPath, checker, children, visited)
+    // A class can also merge with a namespace (`class URL {} namespace URL {...}`);
+    // those exports are public API but carry no static modifier, so
+    // extractStaticMembers does not pick them up.
+    extractNamespaceExports(symbol, parentPath, checker, children, visited)
   } else if (kind === 'function' || kind === 'method') {
     const signatures = type.getCallSignatures()
     if (signatures.length > 0) {

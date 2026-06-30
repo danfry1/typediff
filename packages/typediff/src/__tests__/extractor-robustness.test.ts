@@ -104,4 +104,31 @@ describe('extractor robustness', () => {
     expect(names).toContain('method')
     expect(names.filter((n) => n.startsWith('static '))).toHaveLength(0)
   })
+
+  it('extracts namespace exports merged onto a class', () => {
+    const tree = extract(`
+      export declare class URL {
+        constructor(input: string);
+        readonly href: string;
+      }
+      export declare namespace URL {
+        function canParse(input: string): boolean;
+      }
+    `)
+    const names = allNames(tree)
+    expect(names).toContain('href')      // instance member
+    expect(names).toContain('canParse')  // merged namespace export — public API
+  })
+
+  it('does not leak ES private static fields as public API', () => {
+    const tree = extract(`
+      export declare class Pool {
+        static #active: number;
+        static acquire(): void;
+      }
+    `)
+    const names = allNames(tree)
+    expect(names).toContain('static acquire')
+    expect(names.some((n) => n.includes('#'))).toBe(false)
+  })
 })
