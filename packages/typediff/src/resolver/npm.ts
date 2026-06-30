@@ -532,7 +532,7 @@ async function downloadAndExtract(
   const authHeaders = getAuthHeaders(registry)
 
   // Fetch metadata
-  const metaUrl = `${registry}/${encodeURIComponent(packageName).replace('%40', '@')}/${encodeURIComponent(version)}`
+  const metaUrl = `${registry}/${encodeURIComponent(packageName).replace(/%40/g, '@')}/${encodeURIComponent(version)}`
   const metaRes = await fetchWithRetry(metaUrl, authHeaders)
 
   if (metaRes.status === 404) {
@@ -641,7 +641,7 @@ export async function getPreviousVersion(
 ): Promise<string | null> {
   const registry = getRegistry(packageName, options)
   const authHeaders = getAuthHeaders(registry)
-  const registryUrl = `${registry}/${encodeURIComponent(packageName).replace('%40', '@')}`
+  const registryUrl = `${registry}/${encodeURIComponent(packageName).replace(/%40/g, '@')}`
   const response = await fetchWithRetry(registryUrl, authHeaders)
   if (!response.ok) {
     if (response.status === 404) return null
@@ -684,7 +684,7 @@ export async function getLatestVersion(
 ): Promise<string | null> {
   const registry = getRegistry(packageName, options)
   const authHeaders = getAuthHeaders(registry)
-  const registryUrl = `${registry}/${encodeURIComponent(packageName).replace('%40', '@')}`
+  const registryUrl = `${registry}/${encodeURIComponent(packageName).replace(/%40/g, '@')}`
   const response = await fetchWithRetry(registryUrl, authHeaders)
   if (!response.ok) {
     if (response.status === 404) return null

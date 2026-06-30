@@ -337,7 +337,10 @@ function expandTypesVersionsWildcard(
     const resolved = resolve(pkgDir, candidateTarget)
     if (!existsSync(resolved)) continue
 
-    const entryPoint = `./${subpathPattern.replace('*', name)}`
+    // Node subpath patterns contain exactly one '*'; replace every occurrence
+    // defensively, via a function replacer so a '$' in `name` is not treated as a
+    // replacement pattern.
+    const entryPoint = `./${subpathPattern.replace(/\*/g, () => name)}`
     results.push({ entryPoint, typesPath: resolved })
   }
 
