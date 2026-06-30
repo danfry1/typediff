@@ -44,6 +44,35 @@ describe('annotateImpact', () => {
     expect(changes[0].impact?.prominence).toBe('top-level')
   })
 
+  it('strips literals/comments in linear time (no ReDoS on crafted signatures)', () => {
+    // An unterminated block comment with many `/*` starts would be O(n^2) for a
+    // backtracking regex. The single-pass scanner must handle it in well under a
+    // second, and still strip the comment so no phantom edges are created.
+    const pathological = '/*' + 'Core/*'.repeat(40000)
+    const t = tree([
+      node({ name: 'Core', signature: 'interface Core { v: string }' }),
+      node({ name: 'A', signature: `interface A { c: ${pathological} }` }),
+    ])
+    const changes = [change({ path: 'Core' })]
+    const start = performance.now()
+    annotateImpact(changes, t)
+    expect(performance.now() - start).toBeLessThan(1000)
+    // The `Core` tokens live inside a comment → no edge from A.
+    expect(changes[0].impact?.referencedByPublicExports).toBe(0)
+  })
+
+  it('preserves template-literal interpolation as a real reference', () => {
+    const t = tree([
+      node({ name: 'Variant', signature: 'type Variant = "x" | "y"' }),
+      node({ name: 'Key', signature: 'type Key = `prefix-${Variant}`' }),
+      node({ name: 'Other', signature: 'interface Other { v: string }' }),
+    ])
+    const changes = [change({ path: 'Variant' })]
+    annotateImpact(changes, t)
+    // Key references Variant through `${Variant}` — that edge must survive.
+    expect(changes[0].impact?.referencedByPublicExports).toBe(1)
+  })
+
   it('scores a deep, rarely-referenced member as low impact', () => {
     // objectUtil is referenced by nothing else; the change is 3 levels deep.
     const t = tree([

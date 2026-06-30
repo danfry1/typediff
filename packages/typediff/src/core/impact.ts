@@ -52,14 +52,63 @@ function fullSignatureText(node: ApiNode): string {
  *    edge to an export named `active`. (`${...}` interiors are preserved, since
  *    template-literal types can interpolate real type references.)
  *  - line and block comments.
+ *
+ * Implemented as a single O(n) pass rather than regexes: the input is a type
+ * signature from the analyzed package (untrusted), and a backtracking regex over
+ * it is a denial-of-service vector.
  */
 function stripNonReferenceText(text: string): string {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')        // block comments
-    .replace(/\/\/[^\n]*/g, ' ')              // line comments
-    .replace(/`(?:[^`\\$]|\\.|\$(?!\{))*`/g, ' ') // template literals with no interpolation
-    .replace(/'(?:[^'\\]|\\.)*'/g, ' ')       // single-quoted strings
-    .replace(/"(?:[^"\\]|\\.)*"/g, ' ')       // double-quoted strings
+  let out = ''
+  let i = 0
+  const n = text.length
+  while (i < n) {
+    const c = text[i]
+    const next = text[i + 1]
+    if (c === '/' && next === '*') {
+      i += 2
+      while (i < n && !(text[i] === '*' && text[i + 1] === '/')) i++
+      i += 2 // skip the closing */ (harmless if past end)
+      out += ' '
+    } else if (c === '/' && next === '/') {
+      i += 2
+      while (i < n && text[i] !== '\n') i++
+      out += ' '
+    } else if (c === "'" || c === '"') {
+      i++
+      while (i < n && text[i] !== c) {
+        if (text[i] === '\\') i++ // skip the escaped character
+        i++
+      }
+      i++ // skip the closing quote
+      out += ' '
+    } else if (c === '`') {
+      i++
+      while (i < n && text[i] !== '`') {
+        if (text[i] === '\\') { i += 2; continue }
+        if (text[i] === '$' && text[i + 1] === '{') {
+          // Preserve interpolation — it can hold real type references.
+          out += '${'
+          i += 2
+          let depth = 1
+          while (i < n && depth > 0) {
+            if (text[i] === '{') depth++
+            else if (text[i] === '}') depth--
+            if (depth > 0) out += text[i]
+            i++
+          }
+          out += '}'
+          continue
+        }
+        i++ // drop the literal character
+      }
+      i++ // skip the closing backtick
+      out += ' '
+    } else {
+      out += c
+      i++
+    }
+  }
+  return out
 }
 
 /** Names a type declares as its own generic parameters — references to these are
