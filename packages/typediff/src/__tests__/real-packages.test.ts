@@ -90,13 +90,20 @@ describe('real-world packages', () => {
       expect(result.actualSemver).toBe('major')
 
       const breaking = result.changes.filter(c => c.semver === 'major')
-      // Must catch at least the known union widenings. The count is higher because
-      // invariant-position types are no longer falsely downgraded to minor, and
-      // static class members (e.g. ZodString.create) are now part of the surface.
+      // Must catch the known union widenings (ZodStringCheck, StringValidation).
+      // Per-member compatibility refinement keeps the count tight: backwards-
+      // compatible member changes (e.g. ZodString.create / datetime gaining an
+      // optional field) are correctly downgraded, while genuinely-breaking and
+      // unverifiable-generic members (superRefine, ZodReadonly.*) stay major.
       // The upper bound guards against a false-positive explosion; clean bumps
       // (lodash/axios/react/...) separately assert exactly zero breaking changes.
       expect(breaking.length).toBeGreaterThanOrEqual(1)
-      expect(breaking.length).toBeLessThanOrEqual(13)
+      expect(breaking.length).toBeLessThanOrEqual(12)
+
+      // The two union widenings must always be caught.
+      const breakingPaths = breaking.map(c => c.path)
+      expect(breakingPaths).toContain('StringValidation')
+      expect(breakingPaths).toContain('ZodStringCheck')
 
       // superRefine overload splits: the refinement at the top-level export is
       // no longer falsely downgraded for invariant-position types, so individual

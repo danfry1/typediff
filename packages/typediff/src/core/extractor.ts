@@ -721,10 +721,24 @@ function extractStaticMembers(
     if (!isStatic || isPrivate) continue
     const node = buildApiNode(prop, parentPath, checker, visited)
     if (node) {
+      const oldPath = node.path
       node.name = `static ${node.name}`
       node.path = parentPath ? `${parentPath}.${node.name}` : node.name
+      // Children were built with the un-prefixed name — rewrite their paths so the
+      // whole subtree is consistently addressed under `static <name>`.
+      rewriteSubtreePaths(node, oldPath, node.path)
       children.push(node)
     }
+  }
+}
+
+/** Rewrite a node's descendants' paths after the node's own path prefix changed. */
+function rewriteSubtreePaths(node: ApiNode, oldPrefix: string, newPrefix: string): void {
+  for (const child of node.children) {
+    if (child.path.startsWith(oldPrefix)) {
+      child.path = newPrefix + child.path.slice(oldPrefix.length)
+    }
+    rewriteSubtreePaths(child, oldPrefix, newPrefix)
   }
 }
 

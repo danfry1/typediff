@@ -200,4 +200,59 @@ describe('real-world regression tests', () => {
       expect(result.actualSemver).toBe('patch')
     })
   })
+
+  describe('per-member compatibility refinement', () => {
+    it('downgrades a backwards-compatible member even when a sibling is breaking', async () => {
+      const oldDir = createPkg(`
+        export declare class Service {
+          configure(opts: { a: string }): void;
+          connect(host: string): void;
+        }
+      `)
+      const newDir = createPkg(`
+        export declare class Service {
+          configure(opts: { a: string; b?: number }): void;
+          connect(host: number): void;
+        }
+      `)
+      const result = await diffLocal(oldDir, newDir)
+
+      // configure only gained an optional input field — backwards compatible —
+      // even though its sibling connect changed in a breaking way.
+      expect(result.changes.find((c) => c.path === 'Service.configure.opts')?.semver).toBe('patch')
+      expect(result.changes.find((c) => c.path === 'Service.connect.host')?.semver).toBe('major')
+      expect(result.actualSemver).toBe('major')
+    })
+
+    it('downgrades an optional field added to a static method input, despite a breaking sibling', async () => {
+      const oldDir = createPkg(`
+        export declare class Schema {
+          static create(opts: { name: string }): Schema;
+          parse(x: string): void;
+        }
+      `)
+      const newDir = createPkg(`
+        export declare class Schema {
+          static create(opts: { name: string; message?: string }): Schema;
+          parse(x: number): void;
+        }
+      `)
+      const result = await diffLocal(oldDir, newDir)
+
+      // The static factory only gained an optional input field — downgraded —
+      // even though the instance method parse changed in a breaking way.
+      expect(result.changes.find((c) => c.path.startsWith('Schema.static create'))?.semver).toBe('patch')
+      expect(result.changes.find((c) => c.path.startsWith('Schema.parse'))?.semver).toBe('major')
+    })
+
+    it('keeps a breaking required input addition on a generic member conservative (major)', async () => {
+      // Box is generic, so its member cannot be soundly checked in isolation —
+      // adding a required input field must still surface as breaking.
+      const oldDir = createPkg(`export declare class Box<T> { set(x: { v: T }): void }`)
+      const newDir = createPkg(`export declare class Box<T> { set(x: { v: T; required: string }): void }`)
+      const result = await diffLocal(oldDir, newDir)
+
+      expect(result.changes.find((c) => c.path.startsWith('Box.set'))?.semver).toBe('major')
+    })
+  })
 })

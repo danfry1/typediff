@@ -32,41 +32,78 @@ interface ExportInfo {
  * and compiled it all, taking 34+ seconds. This approach compiles only the
  * small subset that changed.
  */
+/**
+ * A type to compatibility-check: either a top-level export, or a specific member
+ * of one (e.g. a static method, distinguished by `member.isStatic`).
+ */
+export interface CompatTarget {
+  /** Key under which the result is returned. */
+  id: string
+  /** Top-level export to resolve from the module. */
+  exportName: string
+  /** When present, check this member of the export rather than the export itself. */
+  member?: { name: string; isStatic: boolean }
+}
+
 export function checkCompatibility(
   oldDtsPath: string,
   newDtsPath: string,
   exportNames: string[],
 ): Map<string, CompatibilityResult> {
-  if (exportNames.length === 0) return new Map()
+  return checkCompatibilityTargets(
+    oldDtsPath,
+    newDtsPath,
+    exportNames.map((name) => ({ id: name, exportName: name })),
+  )
+}
+
+/**
+ * Generalized compatibility check over arbitrary targets (top-level exports and
+ * individual members). Member targets enable per-child refinement: a member can
+ * be found backwards-compatible even when its containing export changed in a
+ * breaking way elsewhere.
+ */
+export function checkCompatibilityTargets(
+  oldDtsPath: string,
+  newDtsPath: string,
+  targets: CompatTarget[],
+): Map<string, CompatibilityResult> {
+  if (targets.length === 0) return new Map()
 
   // Phase 1: Extract type information from both versions
-  const oldExports = getExportInfo(oldDtsPath, exportNames)
-  const newExports = getExportInfo(newDtsPath, exportNames)
+  const oldInfos = getTargetInfo(oldDtsPath, targets)
+  const newInfos = getTargetInfo(newDtsPath, targets)
 
   // Initialize results — default to compatible
   const results = new Map<string, CompatibilityResult>()
-  for (const name of exportNames) {
-    results.set(name, { newAssignableToOld: true, oldAssignableToNew: true })
+  for (const t of targets) {
+    results.set(t.id, { newAssignableToOld: true, oldAssignableToNew: true })
   }
 
   // Phase 2: Serialize and compare strings
   // Identical serialized types are structurally equivalent — skip compilation
-  const needsCheck: { name: string; oldStr: string; newStr: string }[] = []
+  const needsCheck: { id: string; oldStr: string; newStr: string }[] = []
 
-  for (const name of exportNames) {
-    const oldInfo = oldExports.get(name)
-    const newInfo = newExports.get(name)
+  for (const t of targets) {
+    const oldInfo = oldInfos.get(t.id)
+    const newInfo = newInfos.get(t.id)
     if (!oldInfo || !newInfo) {
-      // Cannot resolve this export — assume incompatible to avoid false downgrades
-      results.set(name, { newAssignableToOld: false, oldAssignableToNew: false })
+      if (t.member) {
+        // An unresolvable member yields no opinion — the caller falls back to the
+        // containing export's result rather than a forced (and possibly wrong) verdict.
+        results.delete(t.id)
+      } else {
+        // Cannot resolve this export — assume incompatible to avoid false downgrades
+        results.set(t.id, { newAssignableToOld: false, oldAssignableToNew: false })
+      }
       continue
     }
 
-    const oldStr = serializeType(oldInfo)
-    const newStr = serializeType(newInfo)
+    const oldStr = serializeTargetType(oldInfo, t)
+    const newStr = serializeTargetType(newInfo, t)
 
     if (oldStr !== newStr) {
-      needsCheck.push({ name, oldStr, newStr })
+      needsCheck.push({ id: t.id, oldStr, newStr })
     }
     // If strings match, the default { true, true } is correct
   }
@@ -84,38 +121,40 @@ export function checkCompatibility(
     )
     checkLines.push('')
 
-    // Build a map from line number to { exportName, direction }
+    // Build a map from line number to { id, direction }
     // so diagnostic matching is O(1) per diagnostic instead of O(n)
     const lineMap = new Map<
       number,
-      { name: string; direction: 'n2o' | 'o2n' }
+      { id: string; direction: 'n2o' | 'o2n' }
     >()
     let hasSerializedNames = false
 
-    for (const { name, oldStr, newStr } of needsCheck) {
-      const sanitized = sanitize(name)
+    needsCheck.forEach(({ id, oldStr, newStr }, index) => {
+      // Index-based identifier keeps the synthetic names valid regardless of the
+      // id's characters (member ids contain dots, spaces, colons).
+      const sanitized = `${sanitize(id)}_${index}`
 
       checkLines.push(`type __Old_${sanitized} = ${oldStr};`)
       checkLines.push(`type __New_${sanitized} = ${newStr};`)
       checkLines.push('')
 
-      checkLines.push(`// CHECK_NEW_TO_OLD_${name}`)
+      checkLines.push(`// CHECK_NEW_TO_OLD ${index}`)
       const n2oConstLine = checkLines.length
       checkLines.push(
         `const __verify_n2o_${sanitized}: AssertAssignable<__New_${sanitized}, __Old_${sanitized}> = true;`,
       )
-      lineMap.set(n2oConstLine, { name, direction: 'n2o' })
+      lineMap.set(n2oConstLine, { id, direction: 'n2o' })
 
-      checkLines.push(`// CHECK_OLD_TO_NEW_${name}`)
+      checkLines.push(`// CHECK_OLD_TO_NEW ${index}`)
       const o2nConstLine = checkLines.length
       checkLines.push(
         `const __verify_o2n_${sanitized}: AssertAssignable<__Old_${sanitized}, __New_${sanitized}> = true;`,
       )
-      lineMap.set(o2nConstLine, { name, direction: 'o2n' })
+      lineMap.set(o2nConstLine, { id, direction: 'o2n' })
 
       checkLines.push('')
       hasSerializedNames = true
-    }
+    })
 
     if (!hasSerializedNames) return results
 
@@ -139,10 +178,12 @@ export function checkCompatibility(
       const entry = lineMap.get(lineNum)
       if (!entry) continue
 
+      const result = results.get(entry.id)
+      if (!result) continue
       if (entry.direction === 'n2o') {
-        results.get(entry.name)!.newAssignableToOld = false
+        result.newAssignableToOld = false
       } else {
-        results.get(entry.name)!.oldAssignableToNew = false
+        result.oldAssignableToNew = false
       }
     }
 
@@ -153,11 +194,12 @@ export function checkCompatibility(
 }
 
 /**
- * Extract type information for a set of export names from a .d.ts file.
+ * Extract type information for a set of targets (top-level exports and members)
+ * from a .d.ts file, keyed by target id.
  */
-function getExportInfo(
+function getTargetInfo(
   dtsPath: string,
-  exportNames: string[],
+  targets: CompatTarget[],
 ): Map<string, ExportInfo> {
   const compilerOptions = {
     target: ts.ScriptTarget.ES2022,
@@ -194,8 +236,8 @@ function getExportInfo(
     }
   }
 
-  for (const name of exportNames) {
-    const sym = exportMap.get(name)
+  for (const target of targets) {
+    const sym = exportMap.get(target.exportName)
     if (!sym) continue
 
     const decls = sym.getDeclarations()
@@ -217,14 +259,75 @@ function getExportInfo(
     const resolvedDecls = resolved.getDeclarations()
     const effectiveDecl = resolvedDecls?.[0] ?? decls[0]
 
-    const type = isTypeOnly
+    const exportType = isTypeOnly
       ? checker.getDeclaredTypeOfSymbol(resolved)
       : checker.getTypeOfSymbolAtLocation(resolved, effectiveDecl)
 
-    result.set(name, { type, symbol: resolved, checker })
+    if (!target.member) {
+      result.set(target.id, { type: exportType, symbol: resolved, checker })
+      continue
+    }
+
+    // Member target: navigate to the named member. Static members live on the
+    // constructor type (getTypeOfSymbolAtLocation), instance/interface members on
+    // the declared type. Unresolvable members are skipped (no result → fall back).
+    const memberInfo = resolveMember(resolved, effectiveDecl, target.member, checker)
+    if (memberInfo) result.set(target.id, memberInfo)
   }
 
   return result
+}
+
+/** Resolve a named member of an export to its type info, or null if not found
+ *  or unsound to check in isolation (see {@link typeHasFreeTypeParameter}). */
+function resolveMember(
+  exportSymbol: ts.Symbol,
+  exportDecl: ts.Declaration,
+  member: { name: string; isStatic: boolean },
+  checker: ts.TypeChecker,
+): ExportInfo | null {
+  try {
+    const baseType = member.isStatic
+      ? checker.getTypeOfSymbolAtLocation(exportSymbol, exportDecl) // constructor (static side)
+      : checker.getDeclaredTypeOfSymbol(exportSymbol)               // instance / interface side
+    const memberSym = baseType.getProperty(member.name)
+    if (!memberSym) return null
+    const memberDecl = memberSym.getDeclarations()?.[0]
+    if (!memberDecl) return null
+    const memberType = checker.getTypeOfSymbolAtLocation(memberSym, memberDecl)
+    // A member whose serialized type could contain a *free* (unbound) type
+    // parameter cannot be soundly checked in isolation: serialized standalone,
+    // the parameter degrades to `any` and the assignability assertion passes
+    // vacuously, falsely downgrading a real break. A free parameter can only
+    // enter the member's shallow serialized form from two sources — skip both:
+    //   (a) the containing export is generic (members may reference its params), or
+    //   (b) the member itself has a generic signature (its own params).
+    // Concrete instantiations (Array<string>) and references to other *named*
+    // types are fine — those serialize as names, not as bare parameters.
+    if (isGenericDependent(exportSymbol, memberType)) return null
+    return { type: memberType, symbol: memberSym, checker }
+  } catch {
+    return null
+  }
+}
+
+function declarationIsGeneric(decl: ts.Declaration): boolean {
+  const tp = (decl as Partial<{ typeParameters: ts.NodeArray<ts.TypeParameterDeclaration> }>).typeParameters
+  return tp !== undefined && tp.length > 0
+}
+
+function isGenericDependent(exportSymbol: ts.Symbol, memberType: ts.Type): boolean {
+  if (exportSymbol.getDeclarations()?.some(declarationIsGeneric)) return true
+  const sigs = [...memberType.getCallSignatures(), ...memberType.getConstructSignatures()]
+  return sigs.some((s) => (s.getTypeParameters()?.length ?? 0) > 0)
+}
+
+/** Serialize a target's type for the assignability check. Members are always
+ *  expanded structurally; top-level exports use kind-specific serialization. */
+function serializeTargetType(info: ExportInfo, target: CompatTarget): string {
+  return target.member
+    ? serializeExpandedType(info.type, info.checker, new Set())
+    : serializeType(info)
 }
 
 /**

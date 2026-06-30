@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { checkCompatibility } from '../core/compatibility.js'
+import { checkCompatibility, checkCompatibilityTargets } from '../core/compatibility.js'
 import { createTempDts } from './helpers.js'
 
 describe('compatibility checker', () => {
@@ -127,5 +127,56 @@ describe('compatibility checker', () => {
     expect(result.has('default')).toBe(true)
     // new (string) is assignable where old (string | number) was expected
     expect(result.get('default')!.newAssignableToOld).toBe(true)
+  })
+
+  describe('member targets (per-child refinement)', () => {
+    it('checks a non-generic member in isolation', () => {
+      const old = fixture('export declare class C { m(opts: { a: string }): void }')
+      const neu = fixture('export declare class C { m(opts: { a: string; b?: number }): void }')
+      const res = checkCompatibilityTargets(old, neu, [
+        { id: 'm', exportName: 'C', member: { name: 'm', isStatic: false } },
+      ])
+      // Adding an optional field to the input is backwards-compatible both ways.
+      expect(res.get('m')).toEqual({ newAssignableToOld: true, oldAssignableToNew: true })
+    })
+
+    it('reports a genuinely breaking non-generic member change', () => {
+      const old = fixture('export declare class C { m(x: string): void }')
+      const neu = fixture('export declare class C { m(x: number): void }')
+      const res = checkCompatibilityTargets(old, neu, [
+        { id: 'm', exportName: 'C', member: { name: 'm', isStatic: false } },
+      ])
+      const r = res.get('m')!
+      expect(r.newAssignableToOld && r.oldAssignableToNew).toBe(false)
+    })
+
+    it('resolves a static member', () => {
+      const old = fixture('export declare class C { static make(o: { a: string }): C }')
+      const neu = fixture('export declare class C { static make(o: { a: string; b?: number }): C }')
+      const res = checkCompatibilityTargets(old, neu, [
+        { id: 'make', exportName: 'C', member: { name: 'make', isStatic: true } },
+      ])
+      expect(res.get('make')).toEqual({ newAssignableToOld: true, oldAssignableToNew: true })
+    })
+
+    it('skips a generic member — unsound to check in isolation, so no result is returned', () => {
+      const old = fixture('export declare class C { gen<U extends string>(x: U): U }')
+      const neu = fixture('export declare class C { gen<U extends number>(x: U): U }')
+      const res = checkCompatibilityTargets(old, neu, [
+        { id: 'gen', exportName: 'C', member: { name: 'gen', isStatic: false } },
+      ])
+      // A generic method's type parameters are unbound in isolation; the gate
+      // returns no result so the caller falls back to the conservative verdict.
+      expect(res.has('gen')).toBe(false)
+    })
+
+    it('skips a member of a generic class', () => {
+      const old = fixture('export declare class Box<T> { unwrap(): T }')
+      const neu = fixture('export declare class Box<T> { unwrap(): T }')
+      const res = checkCompatibilityTargets(old, neu, [
+        { id: 'unwrap', exportName: 'Box', member: { name: 'unwrap', isStatic: false } },
+      ])
+      expect(res.has('unwrap')).toBe(false)
+    })
   })
 })
