@@ -175,4 +175,96 @@ describe('real-world regression tests', () => {
       expect(result.actualSemver).toBe('patch')
     })
   })
+
+  describe('rest parameter changes', () => {
+    it('changing a rest parameter to a positional one is breaking (not patch)', async () => {
+      // (...args: unknown[]) accepts log("m", 1, 2, 3); (args: unknown[]) does not.
+      // Without `...` in the compat serializer both sides look identical and the
+      // change is wrongly downgraded to patch.
+      const oldDir = createPkg(`export declare function log(m: string, ...args: unknown[]): void`)
+      const newDir = createPkg(`export declare function log(m: string, args: unknown[]): void`)
+
+      const result = await diffLocal(oldDir, newDir)
+
+      expect(result.actualSemver).toBe('major')
+      expect(result.changes.some((c) => c.semver === 'major')).toBe(true)
+    })
+
+    it('does not flag an unchanged rest-parameter signature', async () => {
+      const oldDir = createPkg(`export declare function log(m: string, ...args: unknown[]): void`)
+      const newDir = createPkg(`export declare function log(m: string, ...args: unknown[]): void`)
+
+      const result = await diffLocal(oldDir, newDir)
+
+      expect(result.changes).toHaveLength(0)
+      expect(result.actualSemver).toBe('patch')
+    })
+  })
+
+  describe('per-member compatibility refinement', () => {
+    it('downgrades a backwards-compatible member even when a sibling is breaking', async () => {
+      const oldDir = createPkg(`
+        export declare class Service {
+          configure(opts: { a: string }): void;
+          connect(host: string): void;
+        }
+      `)
+      const newDir = createPkg(`
+        export declare class Service {
+          configure(opts: { a: string; b?: number }): void;
+          connect(host: number): void;
+        }
+      `)
+      const result = await diffLocal(oldDir, newDir)
+
+      // configure only gained an optional input field — backwards compatible —
+      // even though its sibling connect changed in a breaking way.
+      expect(result.changes.find((c) => c.path === 'Service.configure.opts')?.semver).toBe('patch')
+      expect(result.changes.find((c) => c.path === 'Service.connect.host')?.semver).toBe('major')
+      expect(result.actualSemver).toBe('major')
+    })
+
+    it('downgrades an optional field added to a static method input, despite a breaking sibling', async () => {
+      const oldDir = createPkg(`
+        export declare class Schema {
+          static create(opts: { name: string }): Schema;
+          parse(x: string): void;
+        }
+      `)
+      const newDir = createPkg(`
+        export declare class Schema {
+          static create(opts: { name: string; message?: string }): Schema;
+          parse(x: number): void;
+        }
+      `)
+      const result = await diffLocal(oldDir, newDir)
+
+      // The static factory only gained an optional input field — downgraded —
+      // even though the instance method parse changed in a breaking way.
+      expect(result.changes.find((c) => c.path.startsWith('Schema.static create'))?.semver).toBe('patch')
+      expect(result.changes.find((c) => c.path.startsWith('Schema.parse'))?.semver).toBe('major')
+    })
+
+    it('keeps a breaking required input addition on a generic-class member conservative (major)', async () => {
+      // Box is generic, so its member references a containing type parameter that
+      // cannot be bound in isolation — adding a required input field must still
+      // surface as breaking (conservative fallback, never a false downgrade).
+      const oldDir = createPkg(`export declare class Box<T> { set(x: { v: T }): void }`)
+      const newDir = createPkg(`export declare class Box<T> { set(x: { v: T; required: string }): void }`)
+      const result = await diffLocal(oldDir, newDir)
+
+      expect(result.changes.find((c) => c.path.startsWith('Box.set'))?.semver).toBe('major')
+    })
+
+    it('soundly checks a generic method on a non-generic class — constraint narrowing stays major', async () => {
+      // The method's own <U extends ...> is bound in the check, so narrowing the
+      // constraint (string → number) is correctly detected as breaking rather
+      // than passing vacuously.
+      const oldDir = createPkg(`export declare class C { transform<U extends string>(x: U): U }`)
+      const newDir = createPkg(`export declare class C { transform<U extends number>(x: U): U }`)
+      const result = await diffLocal(oldDir, newDir)
+
+      expect(result.changes.find((c) => c.path.startsWith('C.transform'))?.semver).toBe('major')
+    })
+  })
 })

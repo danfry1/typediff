@@ -94,9 +94,12 @@ typediff inspect ./dist
 
 ```bash
 typediff inspect zod@3.22.0 zod@3.23.0 --exit-code
-# Exit 0 = no breaking changes
-# Exit 1 = breaking changes found
+# Exit 0 = changes are within the claimed bump (a correct major release passes)
+# Exit 1 = semver mismatch — the changes exceed what the version bump claims
 # Exit 2 = operational error
+#
+# zod 3.22.0 → 3.23.0 claims a minor bump but widens a union (breaking),
+# so this exits 1. A correctly-released major (e.g. 3.x → 4.0.0) exits 0.
 ```
 
 ### Filter by severity
@@ -218,6 +221,30 @@ Use outputs in downstream steps:
 3. Structurally diffs the API trees -- interfaces, types, functions, classes, enums, and namespaces
 4. Uses TypeScript's assignability checker to verify compatibility and eliminate false positives
 5. Classifies each change as major, minor, or patch
+6. Scores each breaking change by blast radius and ranks them (see below)
+
+## Impact Ranking
+
+Not every breaking change matters equally. A widened union on a type that half the API depends on is a different problem from a changed field three levels deep inside a util that nothing else references.
+
+typediff scores each breaking change `high` / `medium` / `low` and lists the high-impact ones first:
+
+```
+   BREAKING
+
+  ✖ ZodStringCheck  high impact · 156 exports depend on it
+    Union type widened — new variants may break exhaustive switches
+
+  ✖ objectUtil.addQuestionMarks.R  low impact
+    Changed export
+```
+
+The score is derived **entirely from the package's own public type graph** — it never reads your code:
+
+- **Centrality** — how many other public exports transitively reference the changed symbol.
+- **Prominence** — whether the symbol is a top-level export or buried in a nested namespace.
+
+Impact is a display and ordering signal only. It **never** changes the semver verdict — a breaking change is breaking regardless of its tier.
 
 ## Accuracy
 
@@ -255,7 +282,7 @@ Options:
   --respect-tags           Honor @internal/@beta/@public TSDoc tags
   --verbose                Show all changes including compatible ones
   --quiet, -q              One-line verdict output
-  --exit-code              Exit 1 if breaking changes found
+  --exit-code              Exit 1 on a semver mismatch (undeclared breaking changes)
   --include-internals      Include _-prefixed internal members
   --workspaces             Scan all workspace packages
   --filter <glob>          Filter workspaces (with --workspaces)
@@ -265,8 +292,8 @@ Options:
   -v, --version            Show version
 
 Exit codes:
-  0  Success (or no breaking changes with --exit-code)
-  1  Breaking changes detected (with --exit-code)
+  0  Success — the actual change level is within what the version bump claims
+  1  Semver mismatch — actual changes exceed the claimed bump (with --exit-code)
   2  Operational error
 ```
 
@@ -352,6 +379,14 @@ interface Change {
   description: string
   oldSignature?: string
   newSignature?: string
+  impact?: Impact         // blast-radius ranking — display-only, never affects semver
+}
+
+interface Impact {
+  tier: 'high' | 'medium' | 'low'
+  referencedByPublicExports: number   // # of other exports that transitively depend on this symbol
+  centralityRatio: number             // share of the module's other exports (0–1)
+  prominence: 'top-level' | 'nested' | 'deep'
 }
 ```
 
