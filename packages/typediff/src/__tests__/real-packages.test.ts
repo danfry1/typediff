@@ -92,11 +92,12 @@ describe('real-world packages', () => {
       const breaking = result.changes.filter(c => c.semver === 'major')
       // Must catch the known union widenings (ZodStringCheck, StringValidation).
       // Per-member compatibility refinement keeps the count tight: backwards-
-      // compatible member changes (e.g. ZodString.create / datetime gaining an
-      // optional field) are correctly downgraded, while genuinely-breaking and
-      // unverifiable-generic members (superRefine, ZodReadonly.*) stay major.
-      // The upper bound guards against a false-positive explosion; clean bumps
-      // (lodash/axios/react/...) separately assert exactly zero breaking changes.
+      // compatible member changes are correctly downgraded — including generic
+      // methods now that their type parameters are bound in the check (e.g.
+      // superRefine's overload split is backwards-compatible per TS, and the
+      // create/datetime optional-field additions). The upper bound guards against
+      // a false-positive explosion; clean bumps (lodash/axios/react/...)
+      // separately assert exactly zero breaking changes.
       expect(breaking.length).toBeGreaterThanOrEqual(1)
       expect(breaking.length).toBeLessThanOrEqual(12)
 

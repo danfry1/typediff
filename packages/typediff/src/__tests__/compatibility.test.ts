@@ -159,18 +159,28 @@ describe('compatibility checker', () => {
       expect(res.get('make')).toEqual({ newAssignableToOld: true, oldAssignableToNew: true })
     })
 
-    it('skips a generic member — unsound to check in isolation, so no result is returned', () => {
+    it('soundly checks a generic method — its own type parameters are bound', () => {
+      // The method's <U extends ...> is emitted into the synthetic check, so a
+      // genuine constraint change is detected rather than passing vacuously.
       const old = fixture('export declare class C { gen<U extends string>(x: U): U }')
       const neu = fixture('export declare class C { gen<U extends number>(x: U): U }')
       const res = checkCompatibilityTargets(old, neu, [
         { id: 'gen', exportName: 'C', member: { name: 'gen', isStatic: false } },
       ])
-      // A generic method's type parameters are unbound in isolation; the gate
-      // returns no result so the caller falls back to the conservative verdict.
-      expect(res.has('gen')).toBe(false)
+      const r = res.get('gen')!
+      expect(r.newAssignableToOld && r.oldAssignableToNew).toBe(false)
     })
 
-    it('skips a member of a generic class', () => {
+    it('downgrades a backwards-compatible generic method change', () => {
+      const old = fixture('export declare class C { gen<U extends string>(x: U, o?: { a: string }): U }')
+      const neu = fixture('export declare class C { gen<U extends string>(x: U, o?: { a: string; b?: number }): U }')
+      const res = checkCompatibilityTargets(old, neu, [
+        { id: 'gen', exportName: 'C', member: { name: 'gen', isStatic: false } },
+      ])
+      expect(res.get('gen')).toEqual({ newAssignableToOld: true, oldAssignableToNew: true })
+    })
+
+    it('skips a member of a generic class (its containing type parameter cannot be bound)', () => {
       const old = fixture('export declare class Box<T> { unwrap(): T }')
       const neu = fixture('export declare class Box<T> { unwrap(): T }')
       const res = checkCompatibilityTargets(old, neu, [

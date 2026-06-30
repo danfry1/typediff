@@ -245,14 +245,26 @@ describe('real-world regression tests', () => {
       expect(result.changes.find((c) => c.path.startsWith('Schema.parse'))?.semver).toBe('major')
     })
 
-    it('keeps a breaking required input addition on a generic member conservative (major)', async () => {
-      // Box is generic, so its member cannot be soundly checked in isolation —
-      // adding a required input field must still surface as breaking.
+    it('keeps a breaking required input addition on a generic-class member conservative (major)', async () => {
+      // Box is generic, so its member references a containing type parameter that
+      // cannot be bound in isolation — adding a required input field must still
+      // surface as breaking (conservative fallback, never a false downgrade).
       const oldDir = createPkg(`export declare class Box<T> { set(x: { v: T }): void }`)
       const newDir = createPkg(`export declare class Box<T> { set(x: { v: T; required: string }): void }`)
       const result = await diffLocal(oldDir, newDir)
 
       expect(result.changes.find((c) => c.path.startsWith('Box.set'))?.semver).toBe('major')
+    })
+
+    it('soundly checks a generic method on a non-generic class — constraint narrowing stays major', async () => {
+      // The method's own <U extends ...> is bound in the check, so narrowing the
+      // constraint (string → number) is correctly detected as breaking rather
+      // than passing vacuously.
+      const oldDir = createPkg(`export declare class C { transform<U extends string>(x: U): U }`)
+      const newDir = createPkg(`export declare class C { transform<U extends number>(x: U): U }`)
+      const result = await diffLocal(oldDir, newDir)
+
+      expect(result.changes.find((c) => c.path.startsWith('C.transform'))?.semver).toBe('major')
     })
   })
 })

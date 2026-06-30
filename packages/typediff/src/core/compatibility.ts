@@ -295,16 +295,15 @@ function resolveMember(
     const memberDecl = memberSym.getDeclarations()?.[0]
     if (!memberDecl) return null
     const memberType = checker.getTypeOfSymbolAtLocation(memberSym, memberDecl)
-    // A member whose serialized type could contain a *free* (unbound) type
-    // parameter cannot be soundly checked in isolation: serialized standalone,
-    // the parameter degrades to `any` and the assignability assertion passes
-    // vacuously, falsely downgrading a real break. A free parameter can only
-    // enter the member's shallow serialized form from two sources — skip both:
-    //   (a) the containing export is generic (members may reference its params), or
-    //   (b) the member itself has a generic signature (its own params).
-    // Concrete instantiations (Array<string>) and references to other *named*
-    // types are fine — those serialize as names, not as bare parameters.
-    if (isGenericDependent(exportSymbol, memberType)) return null
+    // A member can still reference a free type parameter from its *containing*
+    // generic class/interface (e.g. `Box<T> { unwrap(): T }`). Serialized in
+    // isolation that `T` is unbound and degrades to `any`, so the assignability
+    // assertion passes vacuously and a real break is falsely downgraded. The
+    // serializer cannot bind the class parameter (only the member's own, via
+    // serializeTypeParameters), so skip these — the caller falls back to the
+    // conservative top-level result. The member's *own* generic parameters are
+    // bound by the serializer and are safe.
+    if (exportSymbol.getDeclarations()?.some(declarationIsGeneric)) return null
     return { type: memberType, symbol: memberSym, checker }
   } catch {
     return null
@@ -314,12 +313,6 @@ function resolveMember(
 function declarationIsGeneric(decl: ts.Declaration): boolean {
   const tp = (decl as Partial<{ typeParameters: ts.NodeArray<ts.TypeParameterDeclaration> }>).typeParameters
   return tp !== undefined && tp.length > 0
-}
-
-function isGenericDependent(exportSymbol: ts.Symbol, memberType: ts.Type): boolean {
-  if (exportSymbol.getDeclarations()?.some(declarationIsGeneric)) return true
-  const sigs = [...memberType.getCallSignatures(), ...memberType.getConstructSignatures()]
-  return sigs.some((s) => (s.getTypeParameters()?.length ?? 0) > 0)
 }
 
 /** Serialize a target's type for the assignability check. Members are always
@@ -535,30 +528,62 @@ function serializeParam(p: ts.Symbol, checker: ts.TypeChecker): string {
   return `${isRest ? '...' : ''}${p.getName()}${isOptional ? '?' : ''}: ${paramTypeStr}`
 }
 
+/**
+ * Serialize a call signature's own type parameters as `<U extends C, V = D>`.
+ * Emitting these binds the parameters in the synthetic check file so generic
+ * members can be compared soundly: without them, `<U extends string>(x: U)` and
+ * `<U extends number>(x: U)` both serialize to `(x: U)` with U unbound (→ `any`),
+ * so a real constraint change passes the assignability check vacuously.
+ */
+function serializeTypeParameters(sig: ts.Signature, checker: ts.TypeChecker): string {
+  const typeParams = sig.getTypeParameters()
+  if (!typeParams || typeParams.length === 0) return ''
+  const parts = typeParams.map((tp) => {
+    const decl = tp.symbol?.getDeclarations()?.[0]
+    let out = tp.symbol?.getName() ?? 'T'
+    if (decl && ts.isTypeParameterDeclaration(decl)) {
+      if (decl.constraint) {
+        try {
+          out += ` extends ${checker.typeToString(checker.getTypeAtLocation(decl.constraint), undefined, ts.TypeFormatFlags.NoTruncation)}`
+        } catch { /* omit unresolvable constraint */ }
+      }
+      if (decl.default) {
+        try {
+          out += ` = ${checker.typeToString(checker.getTypeAtLocation(decl.default), undefined, ts.TypeFormatFlags.NoTruncation)}`
+        } catch { /* omit unresolvable default */ }
+      }
+    }
+    return out
+  })
+  return `<${parts.join(', ')}>`
+}
+
 function serializeCallSignature(
   sig: ts.Signature,
   checker: ts.TypeChecker,
 ): string {
+  const tp = serializeTypeParameters(sig, checker)
   const params = sig.parameters.map((p) => serializeParam(p, checker))
   const returnTypeStr = checker.typeToString(
     sig.getReturnType(),
     undefined,
     ts.TypeFormatFlags.NoTruncation,
   )
-  return `(${params.join(', ')}): ${returnTypeStr}`
+  return `${tp}(${params.join(', ')}): ${returnTypeStr}`
 }
 
 function serializeCallSignatureAsArrow(
   sig: ts.Signature,
   checker: ts.TypeChecker,
 ): string {
+  const tp = serializeTypeParameters(sig, checker)
   const params = sig.parameters.map((p) => serializeParam(p, checker))
   const returnTypeStr = checker.typeToString(
     sig.getReturnType(),
     undefined,
     ts.TypeFormatFlags.NoTruncation,
   )
-  return `(${params.join(', ')}) => ${returnTypeStr}`
+  return `${tp}(${params.join(', ')}) => ${returnTypeStr}`
 }
 
 function needsQuoting(name: string): boolean {
