@@ -72,26 +72,37 @@ describe('CLI integration', () => {
     expect(lines.length).toBe(1)
   })
 
-  it('--exit-code returns 1 for breaking changes', () => {
+  it('--exit-code returns 1 for an undeclared breaking change (minor claimed, major actual)', () => {
+    // export-removed is 1.0.0 -> 1.1.0 (claimed minor) but removes an export (actual major)
     const fixtureOld = resolve(import.meta.dirname, 'fixtures/export-removed/old')
     const fixtureNew = resolve(import.meta.dirname, 'fixtures/export-removed/new')
     const { exitCode } = run(['inspect', fixtureOld, fixtureNew, '--exit-code'])
     expect(exitCode).toBe(1)
   })
 
-  it('--exit-code returns 0 for minor-only changes without --severity', () => {
-    const fixtureOld = resolve(import.meta.dirname, 'fixtures/export-added/old')
-    const fixtureNew = resolve(import.meta.dirname, 'fixtures/export-added/new')
+  it('--exit-code returns 0 for a correctly-declared major bump with breaking changes', () => {
+    // major-bump is 1.0.0 -> 2.0.0 (claimed major) and removes an export (actual major).
+    // The breaking change is correctly declared, so this is NOT a semver mismatch.
+    const fixtureOld = resolve(import.meta.dirname, 'fixtures/major-bump/old')
+    const fixtureNew = resolve(import.meta.dirname, 'fixtures/major-bump/new')
     const { exitCode } = run(['inspect', fixtureOld, fixtureNew, '--exit-code'])
-    // export-added is a minor change — without --severity, exit-code only triggers on major
     expect(exitCode).toBe(0)
   })
 
-  it('--exit-code with --severity minor returns 1 for minor changes', () => {
+  it('--exit-code returns 0 for a correctly-declared minor change', () => {
+    // export-added is 1.0.0 -> 1.1.0 (claimed minor) and only adds an export (actual minor)
     const fixtureOld = resolve(import.meta.dirname, 'fixtures/export-added/old')
     const fixtureNew = resolve(import.meta.dirname, 'fixtures/export-added/new')
-    const { exitCode } = run(['inspect', fixtureOld, fixtureNew, '--exit-code', '--severity', 'minor'])
-    expect(exitCode).toBe(1)
+    const { exitCode } = run(['inspect', fixtureOld, fixtureNew, '--exit-code'])
+    expect(exitCode).toBe(0)
+  })
+
+  it('--exit-code with --severity major ignores a correctly-declared minor change', () => {
+    // Filtering to major-only leaves no changes, so there is no mismatch to fail on.
+    const fixtureOld = resolve(import.meta.dirname, 'fixtures/export-added/old')
+    const fixtureNew = resolve(import.meta.dirname, 'fixtures/export-added/new')
+    const { exitCode } = run(['inspect', fixtureOld, fixtureNew, '--exit-code', '--severity', 'major'])
+    expect(exitCode).toBe(0)
   })
 
   it('snapshot command exits 2 for nonexistent path', () => {
@@ -287,7 +298,9 @@ describe('CLI .typediffrc.json config', () => {
 
     writeFileSync(join(oldDir, 'package.json'), JSON.stringify({ name: 'test', version: '1.0.0', types: './index.d.ts' }))
     writeFileSync(join(oldDir, 'index.d.ts'), 'export declare const a: string;\nexport declare const b: number;')
-    writeFileSync(join(newDir, 'package.json'), JSON.stringify({ name: 'test', version: '2.0.0', types: './index.d.ts' }))
+    // 1.0.0 -> 1.0.1 claims a patch, but removing `b` is a breaking change — a
+    // genuine semver mismatch, so --exit-code / rc exitCode should fail.
+    writeFileSync(join(newDir, 'package.json'), JSON.stringify({ name: 'test', version: '1.0.1', types: './index.d.ts' }))
     writeFileSync(join(newDir, 'index.d.ts'), 'export declare const a: string;')
 
     // Write rc config
@@ -346,7 +359,7 @@ describe('CLI .typediffrc.json config', () => {
   it('reads exitCode from .typediffrc.json', () => {
     const { dir, oldDir, newDir } = createFixtureWithRc({ exitCode: true })
 
-    // b is removed → major → should exit 1 because exitCode=true in rc
+    // b is removed (breaking) but only a patch is claimed → mismatch → exit 1 because exitCode=true in rc
     const { exitCode } = run(['inspect', oldDir, newDir], dir)
     expect(exitCode).toBe(1)
   })

@@ -111,14 +111,19 @@ If typediff reports no changes when you expect some:
 
 ### Exit code is always 0
 
-You need `--exit-code` to get non-zero exit on breaking changes:
+You need `--exit-code` to get a non-zero exit on a semver mismatch:
 
 ```bash
 typediff inspect pkg@old pkg@new --exit-code
-# Exit 0 = no breaking changes
-# Exit 1 = breaking changes found
+# Exit 0 = changes are within the claimed bump (a correct major release passes)
+# Exit 1 = semver mismatch — changes exceed what the version bump claims
 # Exit 2 = operational error
 ```
+
+Note: `--exit-code` fails only on an *undeclared* breaking change. A version
+bump that correctly declares its breaking changes (e.g. `1.x → 2.0.0`) exits 0.
+To fail on any change at/above a level regardless of the claim, combine with
+`--severity` to filter what counts toward the comparison.
 
 ### GitHub Action not posting comments
 
