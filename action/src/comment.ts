@@ -16,13 +16,36 @@ function statusEmoji(result: ChangeSet): string {
   return isMismatch(result) ? ':x: Mismatch' : ':white_check_mark: Verified'
 }
 
-export function formatComment(results: ChangeSet[]): string {
+export interface CommentOptions {
+  /**
+   * True when the analysis was known to be incomplete — e.g. a lockfile diff
+   * was truncated by GitHub, or some packages could not be analyzed. Surfaced
+   * prominently so a passing check is never mistaken for full coverage.
+   */
+  incomplete?: boolean
+  /** Human-readable reason(s) the analysis was incomplete. */
+  incompleteReasons?: string[]
+}
+
+export function formatComment(results: ChangeSet[], options: CommentOptions = {}): string {
   const lines: string[] = []
 
   lines.push(MARKER)
   lines.push('')
   lines.push('## Dependency Type Verification')
   lines.push('')
+
+  if (options.incomplete) {
+    lines.push(
+      ':warning: **This analysis is incomplete** — some dependency changes could not be verified. ' +
+      'A passing result does not guarantee there are no undeclared breaking changes.',
+    )
+    for (const reason of options.incompleteReasons ?? []) {
+      lines.push(`> - ${reason}`)
+    }
+    lines.push('')
+  }
+
   lines.push('| Package | Claimed | Actual | Status |')
   lines.push('| ------- | ------- | ------ | ------ |')
 
@@ -32,6 +55,24 @@ export function formatComment(results: ChangeSet[]): string {
     lines.push(
       `| \`${result.packageName}\` (${result.oldVersion} → ${result.newVersion}) | ${claimed} | ${result.actualSemver} | ${status} |`,
     )
+  }
+
+  // Surface per-package self-diagnostics (degraded extraction, unresolved
+  // dependency types, compatibility-check failures). Placed before the
+  // mismatch details so the size-truncation step below preserves them.
+  const withDiagnostics = results.filter((r) => r.diagnostics && r.diagnostics.length > 0)
+  if (withDiagnostics.length > 0) {
+    lines.push('')
+    lines.push('### Analysis Warnings')
+    lines.push('')
+    lines.push('These results may be inaccurate — typediff flagged issues while analyzing them:')
+    for (const result of withDiagnostics) {
+      lines.push('')
+      lines.push(`- **${result.packageName}**`)
+      for (const diag of result.diagnostics!) {
+        lines.push(`  - ${diag}`)
+      }
+    }
   }
 
   // Add details blocks for mismatched packages

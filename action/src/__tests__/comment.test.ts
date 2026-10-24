@@ -87,6 +87,39 @@ describe('formatComment', () => {
     expect(comment).not.toMatch(/\| 'a' \| 'b' \|/)
   })
 
+  it('surfaces per-package analysis diagnostics', () => {
+    const results: ChangeSet[] = [
+      makeChangeSet({
+        packageName: 'degraded-lib',
+        diagnostics: ['3 of 4 exports reference types that could not be resolved'],
+      }),
+    ]
+
+    const comment = formatComment(results)
+
+    expect(comment).toContain('Analysis Warnings')
+    expect(comment).toContain('degraded-lib')
+    expect(comment).toContain('could not be resolved')
+  })
+
+  it('renders an incomplete banner with reasons', () => {
+    const results: ChangeSet[] = [makeChangeSet({ packageName: 'ok-lib' })]
+
+    const comment = formatComment(results, {
+      incomplete: true,
+      incompleteReasons: ['`package-lock.json` diff was truncated by GitHub'],
+    })
+
+    expect(comment).toContain('analysis is incomplete')
+    expect(comment).toContain('truncated by GitHub')
+  })
+
+  it('omits the incomplete banner when complete', () => {
+    const results: ChangeSet[] = [makeChangeSet({ packageName: 'ok-lib' })]
+    const comment = formatComment(results)
+    expect(comment).not.toContain('analysis is incomplete')
+  })
+
   it('renders mixed results with both verified and mismatched', () => {
     const results: ChangeSet[] = [
       makeChangeSet({
