@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@actions/core": "^1.10.0",
-    "@actions/github": "^6.0.0",
+    "@actions/github": "^9.1.1",
     "minimatch": "^10.0.0",
     "typediff": "workspace:*"
   },
