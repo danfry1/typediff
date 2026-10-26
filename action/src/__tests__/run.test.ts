@@ -349,9 +349,11 @@ describe('run', () => {
     )
     // Should still create comment with the successful result
     expect(mockOctokit.rest.issues.createComment).toHaveBeenCalled()
+    // A partial failure makes the overall analysis incomplete.
+    expect(core.setOutput).toHaveBeenCalledWith('incomplete', 'true')
   })
 
-  it('skips comment when no analysis results are available', async () => {
+  it('reports incomplete (not pass) when changes were detected but none could be analyzed', async () => {
     const mockOctokit = setupDefaults()
 
     // diff rejects for every package
@@ -360,11 +362,13 @@ describe('run', () => {
     await run()
 
     expect(core.warning).toHaveBeenCalledWith(
-      expect.stringContaining('No packages could be analyzed'),
+      expect.stringContaining('none could be analyzed'),
     )
     expect(mockOctokit.rest.issues.createComment).not.toHaveBeenCalled()
-    // Outputs should still be set to safe defaults
-    expect(core.setOutput).toHaveBeenCalledWith('result', 'pass')
+    // Must NOT silently pass — surface incompleteness instead.
+    expect(core.setOutput).toHaveBeenCalledWith('result', 'incomplete')
+    expect(core.setOutput).toHaveBeenCalledWith('incomplete', 'true')
+    expect(core.setOutput).not.toHaveBeenCalledWith('result', 'pass')
     expect(core.setOutput).toHaveBeenCalledWith('actual-semver', 'patch')
   })
 

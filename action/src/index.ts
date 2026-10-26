@@ -62,14 +62,16 @@ async function run(): Promise<void> {
     // 4. Parse lockfile diffs (may have multiple lockfiles)
     const changedPackages: { name: string; oldVersion: string; newVersion: string }[] = []
     const seen = new Set<string>()
+    const incompleteReasons: string[] = []
     for (const lf of lockfiles) {
       const lfType = detectLockfileType(lf.filename)!
       const patch = lf.patch ?? ''
       if (!lf.patch) {
-        core.warning(
-          `${lf.filename} diff was truncated by GitHub (file too large). ` +
-          `Some dependency changes may not be analyzed.`,
-        )
+        const reason =
+          `\`${lf.filename}\` diff was truncated by GitHub (file too large), ` +
+          `so some dependency changes could not be analyzed.`
+        core.warning(reason)
+        incompleteReasons.push(reason)
       }
       for (const pkg of parseLockfileDiff(patch, lfType)) {
         const key = `${pkg.name}@${pkg.oldVersion}->${pkg.newVersion}`
@@ -126,21 +128,33 @@ async function run(): Promise<void> {
           const pkg = batch[j]
           const reason = result.reason instanceof Error ? result.reason.message : String(result.reason)
           core.warning(`Failed to analyze ${pkg.name}@${pkg.oldVersion}→${pkg.newVersion}: ${reason}`)
+          incompleteReasons.push(
+            `\`${pkg.name}\` (${pkg.oldVersion} → ${pkg.newVersion}) could not be analyzed: ${reason}`,
+          )
         }
       }
     }
 
     if (results.length === 0) {
-      core.warning('No packages could be analyzed — skipping comment.')
-      core.setOutput('result', 'pass')
+      // Dependency changes WERE detected (filteredPackages was non-empty) but none
+      // could be analyzed. Reporting "pass" here would be a silent false negative —
+      // surface it as incomplete instead so consumers can gate on it.
+      core.warning(
+        'Dependency changes were detected but none could be analyzed. ' +
+        'Result is incomplete — this is not a verification that the changes are safe.',
+      )
+      core.setOutput('result', 'incomplete')
+      core.setOutput('incomplete', 'true')
       core.setOutput('actual-semver', 'patch')
       return
     }
 
     core.info(`Analysis complete: ${results.length} package(s) analyzed.`)
 
+    const incomplete = incompleteReasons.length > 0
+
     // 6. Format comment, post/update (find existing by marker)
-    const body = formatComment(results)
+    const body = formatComment(results, { incomplete, incompleteReasons })
     const marker = getCommentMarker()
 
     const comments = await octokit.paginate(octokit.rest.issues.listComments, {
@@ -192,6 +206,13 @@ async function run(): Promise<void> {
       return order[r.actualSemver] > order[highest] ? r.actualSemver : highest
     }, 'patch' as 'patch' | 'minor' | 'major')
     core.setOutput('actual-semver', highestSemver)
+    core.setOutput('incomplete', String(incomplete))
+    if (incomplete) {
+      core.warning(
+        'Analysis was incomplete — see the PR comment. A passing result does not ' +
+        'guarantee there are no undeclared breaking changes.',
+      )
+    }
 
     const fail = shouldFail(results, failOn)
     if (fail) {

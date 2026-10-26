@@ -90,16 +90,45 @@ describe('real-world packages', () => {
       expect(result.actualSemver).toBe('major')
 
       const breaking = result.changes.filter(c => c.semver === 'major')
-      // Must catch at least the known union widenings. The count is higher because
-      // invariant-position types are no longer falsely downgraded to minor.
+      // Must catch the known union widenings (ZodStringCheck, StringValidation).
+      // Per-member compatibility refinement keeps the count tight: backwards-
+      // compatible member changes are correctly downgraded — including generic
+      // methods now that their type parameters are bound in the check (e.g.
+      // superRefine's overload split is backwards-compatible per TS, and the
+      // create/datetime optional-field additions). The upper bound guards against
+      // a false-positive explosion; clean bumps (lodash/axios/react/...)
+      // separately assert exactly zero breaking changes.
       expect(breaking.length).toBeGreaterThanOrEqual(1)
-      expect(breaking.length).toBeLessThanOrEqual(10)
+      expect(breaking.length).toBeLessThanOrEqual(12)
+
+      // The two union widenings must always be caught.
+      const breakingPaths = breaking.map(c => c.path)
+      expect(breakingPaths).toContain('StringValidation')
+      expect(breakingPaths).toContain('ZodStringCheck')
 
       // superRefine overload splits: the refinement at the top-level export is
       // no longer falsely downgraded for invariant-position types, so individual
       // member changes inherit the top-level classification.
       const superRefineChanges = result.changes.filter(c => c.path.includes('superRefine'))
       expect(superRefineChanges.length).toBeGreaterThanOrEqual(0)
+    }, 120_000)
+
+    it('scores blast radius: central types high, deep internals low', async () => {
+      const result = await diff('zod', '3.22.0', '3.23.0')
+      const breaking = result.changes.filter(c => c.semver === 'major')
+
+      // Every breaking change is scored.
+      expect(breaking.every(c => c.impact != null)).toBe(true)
+
+      // objectUtil.addQuestionMarks.R is a deeply-nested internal that nothing
+      // else in the public API references — the canonical "technically breaking,
+      // practically irrelevant" case impact analysis exists to flag.
+      const deepInternal = breaking.find(c => c.path === 'objectUtil.addQuestionMarks.R')
+      expect(deepInternal?.impact?.tier).toBe('low')
+
+      // The widened ZodStringCheck union is referenced across the API → high.
+      const central = breaking.find(c => c.path === 'ZodStringCheck')
+      expect(central?.impact?.tier).toBe('high')
     }, 120_000)
   })
 
@@ -134,6 +163,19 @@ describe('real-world packages', () => {
       // Column.onUpdateFn is output-position readonly — should NOT be breaking
       const breakingPaths = breaking.map(c => c.path)
       expect(breakingPaths).not.toContain('Column.onUpdateFn')
+    }, 300_000)
+
+    it('does not inflate impact for symbols in tiny entry points', async () => {
+      const result = await diff('drizzle-orm', '0.30.0', '0.31.0')
+      const breaking = result.changes.filter(c => c.semver === 'major')
+
+      // Regression: per-entry-point centrality means a symbol referenced by a
+      // single export in a small module yields ratio 1.0. That must NOT read as
+      // high impact — high requires real absolute reach, not a maxed-out ratio.
+      const inflated = breaking.filter(
+        c => c.impact?.tier === 'high' && c.impact.referencedByPublicExports < 3,
+      )
+      expect(inflated).toHaveLength(0)
     }, 300_000)
   })
 })

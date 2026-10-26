@@ -16,9 +16,11 @@ inputs:
     default: '${{ github.token }}'
 outputs:
   result:
-    description: 'Whether the check passed or failed (pass/fail)'
+    description: 'Outcome of the check: pass, fail, or incomplete (changes detected but none could be analyzed)'
   actual-semver:
     description: 'The highest actual semver level detected across all packages'
+  incomplete:
+    description: 'true if some dependency changes could not be analyzed (e.g. a truncated lockfile diff or a failed analysis); a passing result is not a guarantee'
 branding:
   icon: 'check-circle'
   color: 'blue'

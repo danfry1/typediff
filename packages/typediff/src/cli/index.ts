@@ -31,7 +31,7 @@ Options:
   --respect-tags           Honor @internal/@beta/@public TSDoc tags
   --verbose                Show all changes including compatible ones
   --quiet, -q              One-line verdict output
-  --exit-code              Exit 1 if breaking changes found
+  --exit-code              Exit 1 on a semver mismatch (undeclared breaking changes)
   --include-internals      Include _-prefixed internal members
   --workspaces             Scan all workspace packages
   --filter <glob>          Filter workspaces (with --workspaces)
@@ -41,9 +41,13 @@ Options:
   -v, --version            Show version
 
 Exit codes:
-  0  Success (or no breaking changes with --exit-code)
-  1  Breaking changes detected (with --exit-code)
+  0  Success — the actual change level is within what the version bump claims
+  1  Semver mismatch — actual changes exceed the claimed bump (with --exit-code)
   2  Operational error
+
+With --exit-code, a correctly-declared bump never fails: a major release that
+contains breaking changes exits 0, while a minor/patch release that hides them
+exits 1. Use --severity to ignore changes below a level when verifying.
 `.trim()
 
 interface RcConfig {
@@ -79,11 +83,19 @@ function loadRcConfig(): RcConfig {
 
 import { parseSpec, isLocalPath } from './utils.js'
 
-function shouldExitWithError(actualSemver: SemverLevel, severityThreshold?: SemverLevel, changeCount?: number): boolean {
-  // No changes at all — nothing to fail on regardless of threshold
-  if (changeCount !== undefined && changeCount === 0) return false
-  const threshold = severityThreshold ?? 'major'
-  return SEVERITY_ORDER[actualSemver] >= SEVERITY_ORDER[threshold]
+function shouldExitWithError(result: ChangeSet): boolean {
+  // typediff verifies semver *accuracy*: --exit-code fails only when the actual
+  // change level EXCEEDS what the version bump claims (an undeclared breaking
+  // change). A correctly-declared bump — e.g. a major release that does contain
+  // breaking changes — is not a failure. This mirrors the GitHub Action's
+  // shouldFail() and avoids false CI failures on legitimate releases.
+  //
+  // The --severity flag filters which changes are considered (see applyFilters),
+  // so it already raises the bar by excluding lower-severity changes from
+  // actualSemver. When the claimed level is unknown we cannot verify, so we do
+  // not fail (fail-safe).
+  if (result.claimedSemver == null) return false
+  return SEVERITY_ORDER[result.actualSemver] > SEVERITY_ORDER[result.claimedSemver]
 }
 
 function formatAndExit(
@@ -93,7 +105,6 @@ function formatAndExit(
     quiet: boolean
     verbose: boolean
     exitCode: boolean
-    severity?: SemverLevel
     startTime: number
   },
 ): void {
@@ -101,7 +112,7 @@ function formatAndExit(
     ? formatJson(results, { quiet: opts.quiet })
     : formatPretty(results, { verbose: opts.verbose, quiet: opts.quiet, elapsedMs: performance.now() - opts.startTime })
   console.log(output)
-  if (opts.exitCode && results.some(r => shouldExitWithError(r.actualSemver, opts.severity, r.changes.length))) {
+  if (opts.exitCode && results.some(shouldExitWithError)) {
     process.exit(1)
   }
   process.exit(0)
@@ -188,7 +199,7 @@ async function main(): Promise<void> {
       console.error('No publishable workspaces found')
       process.exit(0)
     }
-    formatAndExit(wsResults, { format, quiet, verbose: effectiveVerbose, exitCode, severity, startTime })
+    formatAndExit(wsResults, { format, quiet, verbose: effectiveVerbose, exitCode, startTime })
   }
 
   if (!command) {
@@ -211,7 +222,7 @@ async function main(): Promise<void> {
     }
     const { runCompare } = await import('./commands/compare.js')
     const compareResult = await runCompare(args[0], args[1], typediffOptions)
-    formatAndExit([compareResult], { format, quiet, verbose: effectiveVerbose, exitCode, severity, startTime })
+    formatAndExit([compareResult], { format, quiet, verbose: effectiveVerbose, exitCode, startTime })
   }
 
   if (command !== 'inspect') {
@@ -256,7 +267,7 @@ async function main(): Promise<void> {
       else if (effectiveVerbose) console.error(`  Comparing against ${auto.packageName}@${auto.oldVersion}...`)
       const result = await diffMixed(spec, auto.packageName, auto.oldVersion, false, typediffOptions)
       spinner?.stop()
-      formatAndExit([result], { format, quiet, verbose: effectiveVerbose, exitCode, severity, startTime })
+      formatAndExit([result], { format, quiet, verbose: effectiveVerbose, exitCode, startTime })
     }
 
     const parsed = parseSpec(spec)
@@ -332,7 +343,7 @@ async function main(): Promise<void> {
     }
 
     spinner?.stop()
-    formatAndExit([result], { format, quiet, verbose: effectiveVerbose, exitCode, severity, startTime })
+    formatAndExit([result], { format, quiet, verbose: effectiveVerbose, exitCode, startTime })
   } catch (err) {
     spinner?.stop()
     throw err // re-throw to the top-level handler

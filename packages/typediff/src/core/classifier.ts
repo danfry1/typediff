@@ -147,10 +147,14 @@ export function classifyChanges(changes: Change[]): { actualSemver: SemverLevel 
 
   let result: SemverLevel = 'patch'
   for (const change of changes) {
-    if (!change.semver) {
-      const level = classifyChange(change, change.oldNode, change.newNode)
-      change.semver = level
-    }
+    // The differ pre-sets a coarse `semver` on every change (major for
+    // removed/changed, minor for added). That is only a placeholder — the real
+    // classification depends on position, modifiers, and optionality, which
+    // classifyChange derives. Always reclassify so callers of this public helper
+    // get the same verdict the internal pipeline produces (index.ts does the
+    // same unconditional assignment). Without this, e.g. an added required
+    // property on an invariant interface stays a false `minor`.
+    change.semver = classifyChange(change, change.oldNode, change.newNode)
     result = maxSemver(result, change.semver)
   }
   return { actualSemver: result }

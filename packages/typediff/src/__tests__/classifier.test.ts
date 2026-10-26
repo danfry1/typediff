@@ -339,6 +339,26 @@ describe('classifyChanges', () => {
     const result = classifyChanges([])
     expect(result.actualSemver).toBe('patch')
   })
+
+  it('reclassifies the differ placeholder — added required invariant property is major', () => {
+    // The differ emits this as `minor`; classifyChanges must reclassify it to
+    // major using the node's position/modifiers, not trust the placeholder.
+    const newNode = makeNode({ kind: 'property', position: 'invariant', modifiers: { optional: false } })
+    const changes: Change[] = [
+      makeChange({ kind: 'added', path: 'Options.required', semver: 'minor', newNode }),
+    ]
+    const result = classifyChanges(changes)
+    expect(result.actualSemver).toBe('major')
+    expect(changes[0].semver).toBe('major')
+  })
+
+  it('keeps an added optional property minor', () => {
+    const newNode = makeNode({ kind: 'property', position: 'invariant', modifiers: { optional: true } })
+    const changes: Change[] = [
+      makeChange({ kind: 'added', path: 'Options.maybe', semver: 'minor', newNode }),
+    ]
+    expect(classifyChanges(changes).actualSemver).toBe('minor')
+  })
 })
 
 describe('applyTagRefinement', () => {

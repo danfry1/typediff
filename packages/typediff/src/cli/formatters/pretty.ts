@@ -1,4 +1,4 @@
-import { SEVERITY_ORDER, type Change, type ChangeSet } from '../../core/types.js'
+import { SEVERITY_ORDER, type Change, type ChangeSet, type ImpactTier } from '../../core/types.js'
 import { addedLabel, removedLabel, changedLabel } from '../../core/labels.js'
 
 function shouldUseColor(): boolean {
@@ -69,9 +69,32 @@ function formatMemberList(lines: string[], label: string, members: string[]): vo
   }
 }
 
+/** Rank for ordering breaking changes \u2014 most consequential first. */
+const IMPACT_RANK: Record<ImpactTier, number> = { high: 0, medium: 1, low: 2 }
+
+/** Sort breaking changes by impact tier (high \u2192 low), stable within a tier.
+ *  Unscored changes (e.g. removed entry points) rank as medium so they neither
+ *  jump to the top nor sink to the bottom. */
+function byImpact(a: Change, b: Change): number {
+  const ra = a.impact ? IMPACT_RANK[a.impact.tier] : IMPACT_RANK.medium
+  const rb = b.impact ? IMPACT_RANK[b.impact.tier] : IMPACT_RANK.medium
+  return ra - rb
+}
+
+/** A short, colored badge summarizing a change's blast radius. */
+function impactBadge(change: Change): string {
+  const impact = change.impact
+  if (!impact) return ''
+  const n = impact.referencedByPublicExports
+  const reach = n > 0 ? c.dim(` \u00b7 ${n} export${n === 1 ? '' : 's'} depend on it`) : ''
+  if (impact.tier === 'high') return `  ${c.red('high impact')}${reach}`
+  if (impact.tier === 'medium') return `  ${c.yellow('medium impact')}${reach}`
+  return `  ${c.dim('low impact')}`
+}
+
 function formatBreakingChange(change: Change): string[] {
   const lines: string[] = []
-  lines.push(`${INDENT}${c.red('\u2716')} ${c.bold(change.path)}`)
+  lines.push(`${INDENT}${c.red('\u2716')} ${c.bold(change.path)}${impactBadge(change)}`)
   lines.push(`${INDENT}  ${change.description}`)
 
   // Show specific union diff details when available
@@ -166,7 +189,9 @@ function formatChangeSet(result: ChangeSet, opts: PrettyFormatOptions): string {
   }
 
   // ── Group changes ───────────────────────────────────────────────────────
-  const breaking = result.changes.filter((ch) => ch.semver === 'major')
+  // Sort breaking changes by blast radius so the most consequential surface
+  // first — important because the non-verbose view truncates to the top 8.
+  const breaking = result.changes.filter((ch) => ch.semver === 'major').sort(byImpact)
   const minor = result.changes.filter((ch) => ch.semver === 'minor')
   const compatible = result.changes.filter((ch) => ch.semver === 'patch')
 
