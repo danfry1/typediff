@@ -1,6 +1,6 @@
 {
   "name": "typediff",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Verify semver accuracy by diffing TypeScript types between package versions",
   "type": "module",
   "sideEffects": false,
