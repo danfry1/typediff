@@ -36,13 +36,13 @@
     "prepublishOnly": "bun run build && bun run lint && bun run typecheck"
   },
   "dependencies": {
-    "minimatch": "^10.0.0",
-    "semver": "^7.6.0",
+    "minimatch": "^10.2.6",
+    "semver": "^7.8.5",
     "typescript": "^5.7.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/semver": "^7.5.0",
+    "@types/semver": "^7.8.0",
     "@vitest/coverage-v8": "3",
     "vitest": "^3.0.0"
   },
