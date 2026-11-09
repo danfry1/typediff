@@ -36,7 +36,7 @@
     "prepublishOnly": "bun run build && bun run lint && bun run typecheck"
   },
   "dependencies": {
-    "minimatch": "^10.2.6",
+    "minimatch": "^11.0.4",
     "semver": "^7.8.5",
     "typescript": "^5.7.0"
   },
